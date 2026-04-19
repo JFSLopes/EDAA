@@ -1,8 +1,7 @@
 .idea
 cmake-build-debug
 cache
-graph_diagnostics.png
-nodes.csv
-edges.csv
 porto_walk.graphml
 .DS_Store
+*.csv
+*.png
