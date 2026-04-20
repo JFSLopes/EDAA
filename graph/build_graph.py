@@ -96,9 +96,6 @@ SPEED_MAP = {
     "transfer_bus_walk"    : SPEED_WALK,
     "transfer_metro_walk"  : SPEED_WALK,
     "transfer_bus_metro"   : SPEED_WALK,
-    "transfer_bus_walk_r"  : SPEED_WALK,
-    "transfer_metro_walk_r": SPEED_WALK,
-    "transfer_bus_metro_r" : SPEED_WALK,
 }
 TRANSFER_MODES = {k for k in SPEED_MAP if k.startswith("transfer")}
 
@@ -299,7 +296,6 @@ def make_transfers(src: list[dict], tgt: list[dict],
             continue
         # Weight is raw metres here; converted to seconds in § 7
         final_edges.append({"source": s["id"],        "target": tgt[idx]["id"], "weight": dist, "mode": label})
-        final_edges.append({"source": tgt[idx]["id"], "target": s["id"],        "weight": dist, "mode": label + "_r"})
         count += 1
     return count
 
