@@ -13,6 +13,18 @@ std::shared_ptr<Vertex> Edge::getDest() const {
     return dest;
 }
 
+Mode Edge::getMode() const {
+    return mode;
+}
+
 std::shared_ptr<Vertex> Edge::getOrigin() const {
     return origin;
+}
+
+bool Edge::isSelected() const {
+    return selected;
+}
+
+void Edge::setSelected(bool cond) {
+    selected = cond;
 }

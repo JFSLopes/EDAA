@@ -9,4 +9,5 @@ add_executable(EDAA main.cpp
         source/Vertex.cpp
         source/Coordinate.cpp
         source/FileParser.cpp
+        header/MutablePriorityQueue.h
 )
