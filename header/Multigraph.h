@@ -19,8 +19,12 @@ public:
 
     /// Algorithms
     [[nodiscard]] std::vector<std::shared_ptr<Vertex>> prim(const std::shared_ptr<Vertex>& s) const;
-    void exportPrimCSV(const std::vector<std::shared_ptr<Vertex>>& ans, const std::string& filepath) const;
 
+    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest) const;
+    void dijkstra_aux(const std::shared_ptr<Vertex>& src) const;
+
+    /** Creates a CSV with the points belonging to the path */
+    void exportPathCSV(const std::vector<std::shared_ptr<Vertex>>& path, const std::string& filepath) const;
 };
 
 

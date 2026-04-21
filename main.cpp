@@ -26,11 +26,12 @@ int main() {
     std::cout << "Elapsed: " << elapsed.count() << "s\n";
 
     auto vec = multigraph.getVertex(0);
+    auto dest = multigraph.getVertex(8000);
     std::cout << "HELLO\n";
     std::cout << vec->getId() << "\n";
-    std::vector<std::shared_ptr<Vertex>> ans = multigraph.prim(vec);
+    std::vector<std::shared_ptr<Vertex>> ans = multigraph.dijkstra(vec, dest);
 
-    multigraph.exportPrimCSV(ans, "../graph/prim_edges.csv");
+    multigraph.exportPathCSV(ans, "../graph/prim_edges.csv");
 
     std::unordered_set<u_int> s;
 

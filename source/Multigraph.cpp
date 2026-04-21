@@ -1,5 +1,6 @@
 #include "../header/Multigraph.h"
 #include <cfloat>
+#include <algorithm>
 #include <fstream>
 
 Multigraph::Multigraph() : vertexSet(std::vector<std::shared_ptr<Vertex>>()) {}
@@ -72,10 +73,10 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::prim(const std::shared_ptr<Vert
     return ans;
 }
 
-void Multigraph::exportPrimCSV(const std::vector<std::shared_ptr<Vertex>>& ans, const std::string& filepath) const {
+void Multigraph::exportPathCSV(const std::vector<std::shared_ptr<Vertex>>& path, const std::string& filepath) const {
     std::ofstream out(filepath);
     out << "x1,y1,x2,y2,mode\n";
-    for (const std::shared_ptr<Vertex>& v : ans) {
+    for (const std::shared_ptr<Vertex>& v : path) {
         auto edge = v->getPath();
         if (edge == nullptr) continue;
 
@@ -91,5 +92,57 @@ void Multigraph::exportPrimCSV(const std::vector<std::shared_ptr<Vertex>>& ans, 
             << edge->getOrigin()->getCoordinates().getX()    << ","
             << edge->getOrigin()->getCoordinates().getY()    << ","
             << mode_str                                      << "\n";
+    }
+}
+
+std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest) const {
+    /// Run Dijkstra to get the smaller distances
+    this->dijkstra_aux(src);
+
+    std::vector<std::shared_ptr<Vertex>> ans;
+
+    /// Building from dest to src is easier because there can only be a single path
+    std::shared_ptr<Vertex> current = dest;
+    while (current && current != src) {
+        ans.push_back(current->getPath()->getOrigin());
+        current = current->getPath()->getOrigin();
+    }
+
+    std::reverse(ans.begin(), ans.end());
+    return ans;
+}
+
+void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src) const {
+    std::vector<std::shared_ptr<Vertex>> ans;
+    /// Init the values
+    for (const std::shared_ptr<Vertex>& v: vertexSet){
+        v->setDist(DBL_MAX);
+        v->setVisited(false);
+        v->setPath(nullptr);
+    }
+
+    src->setDist(0);
+    MutablePriorityQueue<Vertex> q;
+    q.insert(src.get());
+    while (!q.empty()) {
+        /// The vertex on the top is always relaxed, that is why we can add it to the answer.
+        Vertex* min = q.extractMin();
+        min->setVisited(true);
+
+        for (const std::shared_ptr<Edge>& edge : min->getAdj()){
+            Vertex* dest = edge->getDest().get();
+            if (dest->isVisited()) continue; /// It was already relaxed
+            else if (dest->getDist() == DBL_MAX){ /// Never relaxed
+                dest->setPath(edge);
+                dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
+                q.insert(dest);
+            }
+            else if (edge->getOrigin()->getDist() + edge->getWeight() < dest->getDist()){
+                /// It is already added to the queue, but we found a better path, so we update it.
+                dest->setPath(edge);
+                dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
+                q.decreaseKey(dest);
+            }
+        }
     }
 }
