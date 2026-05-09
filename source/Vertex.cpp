@@ -11,6 +11,10 @@ const std::vector<std::shared_ptr<Edge>>& Vertex::getAdj() const {
     return adjacent;
 }
 
+const std::string& Vertex::getName() const{
+    return name;
+}
+
 const Coordinate& Vertex::getCoordinates() const {
     return coordinate;
 }

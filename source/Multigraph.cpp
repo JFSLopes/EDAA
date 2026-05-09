@@ -5,7 +5,7 @@
 
 Multigraph::Multigraph() : vertexSet(std::vector<std::shared_ptr<Vertex>>()) {}
 
-std::vector<std::shared_ptr<Vertex>>& Multigraph::getVertexSet() {
+const std::vector<std::shared_ptr<Vertex>>& Multigraph::getVertexSet() const{
     return vertexSet;
 }
 

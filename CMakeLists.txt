@@ -13,4 +13,5 @@ add_executable(EDAA main.cpp
         source/FibonacciHeap.cpp
         source/MutablePriorityQueue.cpp
         source/BruteForceQueue.cpp
+        source/App.cpp
 )

@@ -7,6 +7,7 @@
 #include "BruteForceQueue.h"
 #include <unordered_map>
 #include <set>
+#include <iostream>
 #include <random>
 
 enum PriorityQueueSelected {
@@ -22,7 +23,7 @@ private:
 public:
     Multigraph();
 
-    [[nodiscard]] std::vector<std::shared_ptr<Vertex>>& getVertexSet();
+    [[nodiscard]] const std::vector<std::shared_ptr<Vertex>>& getVertexSet() const;
     [[nodiscard]] std::shared_ptr<Vertex> getVertex(u_int id) const;
 
     u_int addVertex(double x, double y, const std::string& name);
@@ -42,43 +43,20 @@ public:
 };
 
 static std::unique_ptr<PriorityQueue> makePQ(PriorityQueueSelected pqs) {
+
     switch (pqs) {
-        case FIBONACCI_HEAP:        return std::make_unique<FibonacciHeap>();
-        case MUTABLE_PRIORITY_QUEUE: return std::make_unique<MutablePriorityQueue>();
-        case BRUTE_FORCE:           return std::make_unique<BruteForceQueue>();
+        case FIBONACCI_HEAP:
+            std::cout << "Running FIBONACCI HEAP\n";
+            return std::make_unique<FibonacciHeap>();
+
+        case MUTABLE_PRIORITY_QUEUE:
+            std::cout << "Running MUTABLE PRIORITY QUEUE\n";
+            return std::make_unique<MutablePriorityQueue>();
+
+        case BRUTE_FORCE:
+            std::cout << "Running BRUTE FORCE HEAP\n";
+            return std::make_unique<BruteForceQueue>();
     }
-}
-
-static Multigraph buildRandom(int V, int avgDeg, double wMax, std::mt19937& rng) {
-    Multigraph g;
-    std::uniform_real_distribution<double> coord(0.0, 1000.0);
-    std::uniform_real_distribution<double> weight(1.0, wMax);
-    std::uniform_int_distribution<int>     modeD(0, 2);
-    std::uniform_int_distribution<int>     vtxD(0, V - 1);
-
-    for (int i = 0; i < V; i++)
-        g.addVertex(coord(rng), coord(rng), "v" + std::to_string(i));
-
-    // Spanning tree first (guarantees connectivity)
-    for (int i = 1; i < V; i++) {
-        int j = std::uniform_int_distribution<int>(0, i - 1)(rng);
-        Mode m = static_cast<Mode>(modeD(rng));
-        g.addEdge(i, j, weight(rng), m);
-    }
-
-    // Extra random edges
-    int extra = V * avgDeg / 2 - (V - 1);
-    std::set<std::pair<int,int>> seen;
-    for (int k = 0; k < extra * 3 && (int)seen.size() < extra; k++) {
-        int a = vtxD(rng), b = vtxD(rng);
-        if (a == b) continue;
-        if (a > b) std::swap(a, b);
-        if (seen.count({a, b})) continue;
-        seen.insert({a, b});
-        Mode m = static_cast<Mode>(modeD(rng));
-        g.addEdge(a, b, weight(rng), m);
-    }
-    return g;
 }
 
 #endif //EDAA_MULTIGRAPH_H

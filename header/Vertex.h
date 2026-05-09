@@ -27,6 +27,7 @@ public:
     [[nodiscard]] u_int getId() const;
     [[nodiscard]] const std::vector<std::shared_ptr<Edge>>& getAdj() const;
     [[nodiscard]] const Coordinate& getCoordinates() const;
+    [[nodiscard]] const std::string& getName() const;
     [[nodiscard]] bool isVisited() const;
     [[nodiscard]] double getDist() const;
     [[nodiscard]] const std::shared_ptr<Edge>& getPath() const;
