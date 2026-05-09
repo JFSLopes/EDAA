@@ -1,11 +1,7 @@
 #include "../header/FileParser.h"
-#include "../header/Vertex.h"
-#include "../header/Edge.h"
-#include "../header/Multigraph.h"
 
 #include <fstream>
 #include <sstream>
-#include <stdexcept>
 
 FileParser::FileParser(std::string node_file, std::string edge_file)
         : node_file(std::move(node_file)), edge_file(std::move(edge_file)) {}

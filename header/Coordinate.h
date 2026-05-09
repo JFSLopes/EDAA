@@ -11,6 +11,7 @@ public:
 
     [[nodiscard]] double getX() const;
     [[nodiscard]] double getY() const;
+    [[nodiscard]] double distanceTo(const Coordinate& other) const;
 };
 
 

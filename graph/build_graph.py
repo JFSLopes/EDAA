@@ -452,6 +452,23 @@ n_loops  = (edges_df["source"] == edges_df["target"]).sum()
 edges_df = edges_df[edges_df["source"] != edges_df["target"]].copy()
 print(f"  Self-loops removed: {n_loops:,}")
 
+# Add this between § 6 and § 7
+print("  Recomputing walk edge weights from canonical coordinates...")
+xy = canonical_df.set_index("id")[["x", "y"]]
+
+def recompute_walk_dist(row):
+    if row["mode"] != "walk":
+        return row["weight"]   # bus/metro keep original route geometry
+    try:
+        s = xy.loc[row["source"]]
+        t = xy.loc[row["target"]]
+        return float(np.hypot(s["x"] - t["x"], s["y"] - t["y"]))
+    except KeyError:
+        return row["weight"]
+
+edges_df["weight"] = edges_df.apply(recompute_walk_dist, axis=1)
+# weight is still metres here — § 7 converts to seconds as normal
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # § 7 · Convert weights: metres → seconds
 # ═══════════════════════════════════════════════════════════════════════════════

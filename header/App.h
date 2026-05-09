@@ -6,8 +6,6 @@
 #include <string>
 #include <optional>
 
-const std::string PYTHON_INTERPRETER = "python3.11";
-
 class App {
 public:
     App();
@@ -35,10 +33,12 @@ private:
     void runDijkstra();
     void runDijkstraFilter();
     void runPrim();
+    void runAstar();
 
     // ── Benchmark ────────────────────────────────────────────────────────────
     void benchmarkDijkstra();
     void benchmarkPrim();
+    void benchmarkAstarVsDijkstra();
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     std::shared_ptr<Vertex> pickVertex(const std::string& prompt);

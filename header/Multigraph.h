@@ -30,13 +30,16 @@ public:
     void addEdge(u_int source_id, u_int target_id, double weight, Mode mode) const;
 
     /// Algorithms
-    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> prim(const std::shared_ptr<Vertex>& s, const PriorityQueueSelected pqs) const;
+    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> prim(const std::shared_ptr<Vertex>& s, PriorityQueueSelected pqs) const;
 
-    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const PriorityQueueSelected pqs) const;
-    void dijkstra_aux(const std::shared_ptr<Vertex>& src, const PriorityQueueSelected pqs) const;
+    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;
+    void dijkstra_aux(const std::shared_ptr<Vertex>& src, PriorityQueueSelected pqs) const;
 
-    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra_filter(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const std::set<Mode>& modes, const PriorityQueueSelected pqs) const;
-    void dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes, const PriorityQueueSelected pqs) const;
+    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra_filter(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const std::set<Mode>& modes, PriorityQueueSelected pqs) const;
+    void dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes, PriorityQueueSelected pqs) const;
+
+    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> astar(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;
+    void astar_aux(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;
 
     /** Creates a CSV with the points belonging to the path */
     void exportPathCSV(const std::vector<std::shared_ptr<Vertex>>& path, const std::string& filepath) const;

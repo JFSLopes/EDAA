@@ -2,6 +2,7 @@
 #include "../header/FibonacciHeap.h"
 #include "../header/MutablePriorityQueue.h"
 #include "../header/BruteForceQueue.h"
+#include "../header/Utils.h"
 
 #include <iostream>
 #include <chrono>
@@ -210,32 +211,47 @@ void App::loadFromFiles(const std::string& nodesPath, const std::string& edgesPa
 }
 
 void App::loadRandom() {
-    int V   = readInt("  Vertices (e.g. 100000): ", 2, 2000000);
-    int deg = readInt("  Avg edges per vertex (e.g. 8): ", 2, 50);
-    int wMax= readInt("  Max weight (e.g. 1000): ", 1, 100000);
-    int seed= readInt("  Random seed (e.g. 42): ", 0, 999999);
+    int V    = readInt("  Vertices (e.g. 100000): ", 2, 2000000);
+    int deg  = readInt("  Avg edges per vertex (e.g. 8): ", 2, 50);
+    int seed = readInt("  Random seed (e.g. 42): ", 0, 999999);
 
     std::mt19937 rng(seed);
     std::uniform_real_distribution<double> coordX(526000.0, 536000.0);
     std::uniform_real_distribution<double> coordY(4554000.0, 4560000.0);
-    std::uniform_real_distribution<double> weight(1.0, (double)wMax);
     std::uniform_int_distribution<int>     modeD(0, 2);
     std::uniform_int_distribution<int>     vtxD(0, V - 1);
+
+    static const double SPEEDS[] = { SPEED_WALK, SPEED_BUS, SPEED_METRO };
 
     multigraph = Multigraph();
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    std::cout << "  Building " << V << " vertices...\n";
-    for (int i = 0; i < V; i++)
-        multigraph.addVertex(coordX(rng), coordY(rng), "v" + std::to_string(i));
+    // Step 1 — generate all coordinates upfront
+    std::cout << "  Generating " << V << " vertices...\n";
+    std::vector<std::pair<double,double>> coords(V);
+    for (int i = 0; i < V; i++) {
+        coords[i] = { coordX(rng), coordY(rng) };
+        multigraph.addVertex(coords[i].first, coords[i].second, "v" + std::to_string(i));
+    }
+
+    // Step 2 — compute weight from spatial distance / mode speed
+    auto makeWeight = [&](int a, int b, Mode mode) -> double {
+        double dx = coords[a].first  - coords[b].first;
+        double dy = coords[a].second - coords[b].second;
+        double dist = std::sqrt(dx * dx + dy * dy);
+        return dist / SPEEDS[static_cast<int>(mode)];  // seconds
+    };
 
     // Spanning tree first — guarantees connectivity
+    std::cout << "  Building spanning tree...\n";
     for (int i = 1; i < V; i++) {
-        int j = std::uniform_int_distribution<int>(0, i - 1)(rng);
-        multigraph.addEdge(i, j, weight(rng), static_cast<Mode>(modeD(rng)));
+        int  j    = std::uniform_int_distribution<int>(0, i - 1)(rng);
+        Mode mode = static_cast<Mode>(modeD(rng));
+        multigraph.addEdge(i, j, makeWeight(i, j, mode), mode);
     }
 
     // Extra random edges
+    std::cout << "  Adding extra edges...\n";
     int target = V * deg / 2 - (V - 1);
     std::set<std::pair<int,int>> seen;
     for (int k = 0; k < target * 5 && (int)seen.size() < target; k++) {
@@ -244,7 +260,8 @@ void App::loadRandom() {
         if (a > b) std::swap(a, b);
         if (seen.count({a, b})) continue;
         seen.insert({a, b});
-        multigraph.addEdge(a, b, weight(rng), static_cast<Mode>(modeD(rng)));
+        Mode mode = static_cast<Mode>(modeD(rng));
+        multigraph.addEdge(a, b, makeWeight(a, b, mode), mode);
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -277,6 +294,28 @@ void App::runDijkstra() {
 
     if (readYesNo("\n  Export path?"))
         exportAndVisualize(path, "Dijkstra");
+
+    waitEnter();
+}
+
+void App::runAstar() {
+    if (!requireGraph()) return;
+
+    auto src  = pickVertex("Select SOURCE vertex");
+    if (!src) { waitEnter(); return; }
+    auto dest = pickVertex("Select DESTINATION vertex");
+    if (!dest) { waitEnter(); return; }
+    auto pqs  = pickPQ("Select priority queue");
+
+    auto t0   = std::chrono::high_resolution_clock::now();
+    auto path = multigraph.astar(src, dest, pqs);
+    auto t1   = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
+    printPath(path, "A*", elapsed);
+
+    if (readYesNo("\n  Export path?"))
+        exportAndVisualize(path, "Astar");
 
     waitEnter();
 }
@@ -401,6 +440,57 @@ void App::benchmarkDijkstra() {
     waitEnter();
 }
 
+void App::benchmarkAstarVsDijkstra() {
+    if (!requireGraph()) return;
+
+    auto src  = pickVertex("Select SOURCE vertex");
+    if (!src) { waitEnter(); return; }
+    auto dest = pickVertex("Select DESTINATION vertex");
+    if (!dest) { waitEnter(); return; }
+    auto pqs  = pickPQ("Select priority queue (same for both)");
+    int runs  = readInt("  Number of runs: ", 1, 100);
+
+    struct Result { std::string name; double elapsed; size_t hops; double dist; };
+    std::vector<Result> results;
+
+    auto bench = [&](const std::string& name, auto fn) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        std::vector<std::shared_ptr<Vertex>> path;
+        for (int i = 0; i < runs; i++) path = fn();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(t1 - t0).count() / runs;
+        results.push_back({name, elapsed, path.size(), dest->getDist()});
+        std::cout << "  " << name << " done.\n";
+    };
+
+    std::cout << "\n  Running...\n";
+    bench("Dijkstra", [&]{ return multigraph.dijkstra(src, dest, pqs); });
+    bench("A*",       [&]{ return multigraph.astar(src, dest, pqs); });
+
+    auto fastest = std::min_element(results.begin(), results.end(),
+                                    [](const Result& a, const Result& b){ return a.elapsed < b.elapsed; });
+
+    std::cout << "\n  ── A* vs Dijkstra (" << runs << " run avg) ────────\n";
+    std::cout << std::left
+              << std::setw(14) << "  Algorithm"
+              << std::setw(14) << "Time (s)"
+              << std::setw(10) << "Hops"
+              << "Distance\n";
+    std::cout << "  " << std::string(46, '-') << "\n";
+    for (auto& r : results) {
+        std::cout << "  " << std::setw(12) << r.name
+                  << std::setw(14) << std::fixed << std::setprecision(5) << r.elapsed
+                  << std::setw(10) << r.hops
+                  << std::fixed << std::setprecision(2) << r.dist
+                  << (r.name == fastest->name ? "  ← fastest" : "") << "\n";
+    }
+    double speedup = results[0].elapsed / results[1].elapsed;
+    std::cout << "\n  A* speedup over Dijkstra: "
+              << std::fixed << std::setprecision(2) << speedup << "x\n";
+
+    waitEnter();
+}
+
 void App::benchmarkPrim() {
     if (!requireGraph()) return;
 
@@ -496,13 +586,15 @@ void App::menuAlgorithms() {
     std::cout << "  [1] Dijkstra (shortest path)\n";
     std::cout << "  [2] Dijkstra with mode filter\n";
     std::cout << "  [3] Prim's MST\n";
+    std::cout << "  [4] A* (shortest path)\n";
     std::cout << "  [0] Back\n\n";
 
-    int c = readInt("  > ", 0, 3);
+    int c = readInt("  > ", 0, 4);
     switch (c) {
         case 1: runDijkstra();       break;
         case 2: runDijkstraFilter(); break;
         case 3: runPrim();           break;
+        case 4: runAstar(); break;
         default: break;
     }
 }
@@ -513,12 +605,14 @@ void App::menuBenchmark() {
     std::cout << "  Benchmark\n\n";
     std::cout << "  [1] Dijkstra — compare all priority queues\n";
     std::cout << "  [2] Prim    — compare all priority queues\n";
+    std::cout << "  [3] A* vs Dijkstra\n";
     std::cout << "  [0] Back\n\n";
 
-    int c = readInt("  > ", 0, 2);
+    int c = readInt("  > ", 0, 3);
     switch (c) {
         case 1: benchmarkDijkstra(); break;
         case 2: benchmarkPrim();     break;
+        case 3: benchmarkAstarVsDijkstra(); break;
         default: break;
     }
 }

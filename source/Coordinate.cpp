@@ -10,3 +10,9 @@ double Coordinate::getX() const {
 double Coordinate::getY() const {
     return y;
 }
+
+double Coordinate::distanceTo(const Coordinate& other) const {
+    double dx = x - other.getX();
+    double dy = y - other.getY();
+    return std::sqrt(dx * dx + dy * dy);
+}
