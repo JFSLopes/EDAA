@@ -3,6 +3,7 @@
 
 #include "Vertex.h"
 #include <unordered_map>
+#include <set>
 
 class Multigraph {
 private:
@@ -22,6 +23,9 @@ public:
 
     [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest) const;
     void dijkstra_aux(const std::shared_ptr<Vertex>& src) const;
+
+    [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra_filter(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const std::set<Mode>& modes) const;
+    void dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes) const;
 
     /** Creates a CSV with the points belonging to the path */
     void exportPathCSV(const std::vector<std::shared_ptr<Vertex>>& path, const std::string& filepath) const;

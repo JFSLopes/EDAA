@@ -146,3 +146,59 @@ void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src) const {
         }
     }
 }
+
+
+std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra_filter(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest, const std::set<Mode>& modes) const {
+    /// Run Dijkstra to get the smaller distances
+    this->dijkstra_filter_aux(src, modes);
+
+    std::vector<std::shared_ptr<Vertex>> ans;
+
+    /// Building from dest to src is easier because there can only be a single path
+    std::shared_ptr<Vertex> current = dest;
+    while (current && current != src) {
+        ans.push_back(current->getPath()->getOrigin());
+        current = current->getPath()->getOrigin();
+    }
+
+    std::reverse(ans.begin(), ans.end());
+    return ans;
+}
+
+void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes) const {
+    std::vector<std::shared_ptr<Vertex>> ans;
+    /// Init the values
+    for (const std::shared_ptr<Vertex>& v: vertexSet){
+        v->setDist(DBL_MAX);
+        v->setVisited(false);
+        v->setPath(nullptr);
+    }
+
+    src->setDist(0);
+    MutablePriorityQueue<Vertex> q;
+    q.insert(src.get());
+    while (!q.empty()) {
+        /// The vertex on the top is always relaxed, that is why we can add it to the answer.
+        Vertex* min = q.extractMin();
+        min->setVisited(true);
+
+        for (const std::shared_ptr<Edge>& edge : min->getAdj()){
+            if (modes.find(edge->getMode()) == modes.end()){    /// Cannot use this edge
+                continue;
+            }
+            Vertex* dest = edge->getDest().get();
+            if (dest->isVisited()) continue; /// It was already relaxed
+            else if (dest->getDist() == DBL_MAX){ /// Never relaxed
+                dest->setPath(edge);
+                dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
+                q.insert(dest);
+            }
+            else if (edge->getOrigin()->getDist() + edge->getWeight() < dest->getDist()){
+                /// It is already added to the queue, but we found a better path, so we update it.
+                dest->setPath(edge);
+                dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
+                q.decreaseKey(dest);
+            }
+        }
+    }
+}

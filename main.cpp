@@ -29,7 +29,8 @@ int main() {
     auto dest = multigraph.getVertex(8000);
     std::cout << "HELLO\n";
     std::cout << vec->getId() << "\n";
-    std::vector<std::shared_ptr<Vertex>> ans = multigraph.dijkstra(vec, dest);
+    std::set<Mode> modes = {METRO, WALK};
+    std::vector<std::shared_ptr<Vertex>> ans = multigraph.dijkstra_filter(vec, dest, modes);
 
     multigraph.exportPathCSV(ans, "../graph/prim_edges.csv");
 
