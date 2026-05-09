@@ -10,4 +10,7 @@ add_executable(EDAA main.cpp
         source/Coordinate.cpp
         source/FileParser.cpp
         header/MutablePriorityQueue.h
+        source/FibonacciHeap.cpp
+        source/MutablePriorityQueue.cpp
+        source/BruteForceQueue.cpp
 )

@@ -27,7 +27,7 @@ void Multigraph::addEdge(u_int source_id, u_int target_id, double weight, Mode m
     dest->addEdge(dest, source, weight, mode);
 }
 
-std::vector<std::shared_ptr<Vertex>> Multigraph::prim(const std::shared_ptr<Vertex>& s) const {
+std::vector<std::shared_ptr<Vertex>> Multigraph::prim(const std::shared_ptr<Vertex>& s, const PriorityQueueSelected pqs) const {
     std::vector<std::shared_ptr<Vertex>> ans;
     /// Init the values
     for (const std::shared_ptr<Vertex>& v: vertexSet){
@@ -39,13 +39,14 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::prim(const std::shared_ptr<Vert
         }
     }
 
-    MutablePriorityQueue<Vertex> q;
+    std::unique_ptr<PriorityQueue> q = makePQ(pqs);
+
     Vertex* start = s.get();
     start->setDist(0);
-    q.insert(start);
-    while (!q.empty()) {
+    q->insert(start);
+    while (!q->empty()) {
         /// The vertex on the top is always relaxed, that is why we can add it to the answer.
-        Vertex* minVertex = q.extractMin();
+        Vertex* minVertex = q->extractMin();
         minVertex->setVisited(true);
         ans.push_back(getVertex(minVertex->getId()));
 
@@ -58,7 +59,7 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::prim(const std::shared_ptr<Vert
                 edge->setSelected(true);
                 dest->setPath(edge);
                 dest->setDist(edge->getWeight());
-                q.insert(dest);
+                q->insert(dest);
             }
                 /// If it was already added to the queue, but we found a better path, we update it.
             else if (edge->getWeight() < dest->getDist()){
@@ -66,7 +67,7 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::prim(const std::shared_ptr<Vert
                 dest->getPath()->setSelected(false);
                 dest->setPath(edge);
                 dest->setDist(edge->getWeight());
-                q.decreaseKey(dest);
+                q->decreaseKey(dest);
             }
         }
     }
@@ -95,9 +96,9 @@ void Multigraph::exportPathCSV(const std::vector<std::shared_ptr<Vertex>>& path,
     }
 }
 
-std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest) const {
+std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest, const PriorityQueueSelected pqs) const {
     /// Run Dijkstra to get the smaller distances
-    this->dijkstra_aux(src);
+    this->dijkstra_aux(src, pqs);
 
     std::vector<std::shared_ptr<Vertex>> ans;
 
@@ -112,7 +113,7 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra(const std::shared_ptr<
     return ans;
 }
 
-void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src) const {
+void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src, const PriorityQueueSelected pqs) const {
     std::vector<std::shared_ptr<Vertex>> ans;
     /// Init the values
     for (const std::shared_ptr<Vertex>& v: vertexSet){
@@ -122,11 +123,13 @@ void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src) const {
     }
 
     src->setDist(0);
-    MutablePriorityQueue<Vertex> q;
-    q.insert(src.get());
-    while (!q.empty()) {
+
+    std::unique_ptr<PriorityQueue> q = makePQ(pqs);
+
+    q->insert(src.get());
+    while (!q->empty()) {
         /// The vertex on the top is always relaxed, that is why we can add it to the answer.
-        Vertex* min = q.extractMin();
+        Vertex* min = q->extractMin();
         min->setVisited(true);
 
         for (const std::shared_ptr<Edge>& edge : min->getAdj()){
@@ -135,22 +138,22 @@ void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src) const {
             else if (dest->getDist() == DBL_MAX){ /// Never relaxed
                 dest->setPath(edge);
                 dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
-                q.insert(dest);
+                q->insert(dest);
             }
             else if (edge->getOrigin()->getDist() + edge->getWeight() < dest->getDist()){
                 /// It is already added to the queue, but we found a better path, so we update it.
                 dest->setPath(edge);
                 dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
-                q.decreaseKey(dest);
+                q->decreaseKey(dest);
             }
         }
     }
 }
 
 
-std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra_filter(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest, const std::set<Mode>& modes) const {
+std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra_filter(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest, const std::set<Mode>& modes, const PriorityQueueSelected pqs) const {
     /// Run Dijkstra to get the smaller distances
-    this->dijkstra_filter_aux(src, modes);
+    this->dijkstra_filter_aux(src, modes, pqs);
 
     std::vector<std::shared_ptr<Vertex>> ans;
 
@@ -165,7 +168,7 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra_filter(const std::shar
     return ans;
 }
 
-void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes) const {
+void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes, const PriorityQueueSelected pqs) const {
     std::vector<std::shared_ptr<Vertex>> ans;
     /// Init the values
     for (const std::shared_ptr<Vertex>& v: vertexSet){
@@ -175,11 +178,13 @@ void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const s
     }
 
     src->setDist(0);
-    MutablePriorityQueue<Vertex> q;
-    q.insert(src.get());
-    while (!q.empty()) {
+
+    std::unique_ptr<PriorityQueue> q = makePQ(pqs);
+
+    q->insert(src.get());
+    while (!q->empty()) {
         /// The vertex on the top is always relaxed, that is why we can add it to the answer.
-        Vertex* min = q.extractMin();
+        Vertex* min = q->extractMin();
         min->setVisited(true);
 
         for (const std::shared_ptr<Edge>& edge : min->getAdj()){
@@ -191,13 +196,13 @@ void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const s
             else if (dest->getDist() == DBL_MAX){ /// Never relaxed
                 dest->setPath(edge);
                 dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
-                q.insert(dest);
+                q->insert(dest);
             }
             else if (edge->getOrigin()->getDist() + edge->getWeight() < dest->getDist()){
                 /// It is already added to the queue, but we found a better path, so we update it.
                 dest->setPath(edge);
                 dest->setDist(edge->getOrigin()->getDist() + edge->getWeight());
-                q.decreaseKey(dest);
+                q->decreaseKey(dest);
             }
         }
     }

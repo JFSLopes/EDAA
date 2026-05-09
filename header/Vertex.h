@@ -37,7 +37,7 @@ public:
 
     void addEdge(const std::shared_ptr<Vertex> source, const std::shared_ptr<Vertex> dest, double weight, Mode mode);
 
-    friend class MutablePriorityQueue<Vertex>;
+    friend class MutablePriorityQueue;
 
 protected:
     int queueIndex = 0; ///< Used in the mutable priority queue
