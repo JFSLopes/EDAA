@@ -2,163 +2,158 @@
 #include "../header/Vertex.h"
 
 FibonacciHeap::~FibonacciHeap() {
-    // BFS over all nodes to delete them
-    std::vector<FibNode*> toDelete;
-    if (!minNode) return;
-
-    std::vector<FibNode*> roots;
-    FibNode* cur = minNode;
-    do { roots.push_back(cur); cur = cur->right; } while (cur != minNode);
-
-    while (!roots.empty()) {
-        FibNode* node = roots.back(); roots.pop_back();
-        if (node->child) {
-            FibNode* c = node->child;
-            do { roots.push_back(c); c = c->right; } while (c != node->child);
-        }
-        delete node;
-    }
+    _deleteAll(heap_);
 }
 
-void FibonacciHeap::addToRootList(FibNode* x) {
-    x->parent = nullptr;
-    if (!minNode) {
-        x->left = x->right = x;
-        minNode = x;
+void FibonacciHeap::_deleteAll(FibNode* n) {
+    if (!n) return;
+    FibNode* c = n;
+    do {
+        FibNode* d = c;
+        c = c->next;
+        _deleteAll(d->child);
+        delete d;
+    } while (c != n);
+}
+
+FibonacciHeap::FibNode* FibonacciHeap::_merge(FibNode* a, FibNode* b) {
+    if (!a) return b;
+    if (!b) return a;
+    /// Ensure a has the smaller dist
+    if (a->vertex->getDist() > b->vertex->getDist()) std::swap(a, b);
+    FibNode* an = a->next;
+    FibNode* bp = b->prev;
+    a->next  = b;
+    b->prev  = a;
+    an->prev = bp;
+    bp->next = an;
+    return a;
+}
+
+void FibonacciHeap::_addChild(FibNode* parent, FibNode* child) {
+    child->prev = child->next = child;
+    child->parent = parent;
+    parent->degree++;
+    parent->child = _merge(parent->child, child);
+}
+
+void FibonacciHeap::_unMarkAndUnParentAll(FibNode* n) {
+    if (!n) return;
+    FibNode* c = n;
+    do {
+        c->marked = false;
+        c->parent = nullptr;
+        c = c->next;
+    } while (c != n);
+}
+
+FibonacciHeap::FibNode* FibonacciHeap::_removeMinimum(FibNode* n) {
+    _unMarkAndUnParentAll(n->child);
+    if (n->next == n) {
+        n = n->child;
     } else {
-        // Insert x to the left of minNode in the circular list
-        x->right = minNode;
-        x->left  = minNode->left;
-        minNode->left->right = x;
-        minNode->left = x;
-        if (x->vertex->getDist() < minNode->vertex->getDist())
-            minNode = x;
+        n->next->prev = n->prev;
+        n->prev->next = n->next;
+        n = _merge(n->next, n->child);
     }
+    if (!n) return nullptr;
+
+    FibNode* trees[64] = {nullptr};
+    while (true) {
+        if (trees[n->degree]) {
+            FibNode* t = trees[n->degree];
+            if (t == n) break;
+            trees[n->degree] = nullptr;
+            if (n->vertex->getDist() < t->vertex->getDist()) {
+                t->prev->next = t->next;
+                t->next->prev = t->prev;
+                _addChild(n, t);
+            } else {
+                t->prev->next = t->next;
+                t->next->prev = t->prev;
+                if (n->next == n) {
+                    t->next = t->prev = t;
+                    _addChild(t, n);
+                    n = t;
+                } else {
+                    n->prev->next = t;
+                    n->next->prev = t;
+                    t->next = n->next;
+                    t->prev = n->prev;
+                    _addChild(t, n);
+                    n = t;
+                }
+            }
+            continue;
+        }
+        trees[n->degree] = n;
+        n = n->next;
+    }
+
+    FibNode* min   = n;
+    FibNode* start = n;
+    do {
+        if (n->vertex->getDist() < min->vertex->getDist()) min = n;
+        n = n->next;
+    } while (n != start);
+    return min;
 }
 
-void FibonacciHeap::removeFromRootList(FibNode* x) {
-    x->left->right = x->right;
-    x->right->left = x->left;
+FibonacciHeap::FibNode* FibonacciHeap::_cut(FibNode* heap, FibNode* n) {
+    if (n->next == n) {
+        n->parent->child = nullptr;
+    } else {
+        n->next->prev = n->prev;
+        n->prev->next = n->next;
+        n->parent->child = n->next;
+    }
+    n->next = n->prev = n;
+    n->marked = false;
+    return _merge(heap, n);
+}
+
+FibonacciHeap::FibNode* FibonacciHeap::_decreaseKey(FibNode* heap, FibNode* n) {
+    if (n->parent && n->vertex->getDist() < n->parent->vertex->getDist()) {
+        heap = _cut(heap, n);
+        FibNode* parent = n->parent;
+        n->parent = nullptr;
+        while (parent && parent->marked) {
+            heap = _cut(heap, parent);
+            FibNode* next = parent->parent;
+            parent->parent = nullptr;
+            parent = next;
+        }
+        if (parent && parent->parent) parent->marked = true;
+    } else if (!n->parent && n->vertex->getDist() < heap->vertex->getDist()) {
+        heap = n;
+    }
+    return heap;
 }
 
 void FibonacciHeap::insert(Vertex* v) {
-    FibNode* node = new FibNode(v);
-    nodeMap[v] = node;
-    addToRootList(node);
+    FibNode* n = new FibNode(v);
+    nodeMap[v] = n;
+    heap_ = _merge(heap_, n);
     size_++;
 }
 
 Vertex* FibonacciHeap::extractMin() {
-    FibNode* z = minNode;
-    if (!z) return nullptr;
-
-    // Promote all children to a root list
-    if (z->child) {
-        std::vector<FibNode*> children;
-        FibNode* c = z->child;
-        do { children.push_back(c); c = c->right; } while (c != z->child);
-        for (FibNode* child : children) {
-            addToRootList(child);
-            child->parent = nullptr;
-        }
-    }
-
-    removeFromRootList(z);
-    if (z == z->right) {
-        minNode = nullptr;   // the heap is now empty
-    } else {
-        minNode = z->right;
-        consolidate();
-    }
-
-    size_--;
-    Vertex* result = z->vertex;
+    if (!heap_) return nullptr;
+    FibNode* old = heap_;
+    heap_ = _removeMinimum(heap_);
+    Vertex* result = old->vertex;
     nodeMap.erase(result);
-    delete z;
+    delete old;
+    size_--;
     return result;
 }
 
-void FibonacciHeap::link(FibNode* y, FibNode* x) {
-    // Make y a child of x
-    removeFromRootList(y);
-    y->parent = x;
-    if (!x->child) {
-        x->child = y;
-        y->left = y->right = y;
-    } else {
-        y->right = x->child;
-        y->left  = x->child->left;
-        x->child->left->right = y;
-        x->child->left = y;
-    }
-    x->degree++;
-    y->marked = false;
-}
-
-void FibonacciHeap::consolidate() {
-    int maxDeg = static_cast<int>(std::log2(size_)) + 2;
-    std::vector<FibNode*> degTable(maxDeg, nullptr);
-
-    // Collect all roots first to avoid iterator invalidation
-    std::vector<FibNode*> roots;
-    FibNode* cur = minNode;
-    do { roots.push_back(cur); cur = cur->right; } while (cur != minNode);
-
-    for (FibNode* w : roots) {
-        FibNode* x = w;
-        int d = x->degree;
-        while (d < maxDeg && degTable[d]) {
-            FibNode* y = degTable[d];
-            if (x->vertex->getDist() > y->vertex->getDist()) std::swap(x, y);
-            link(y, x);
-            degTable[d] = nullptr;
-            d++;
-        }
-        if (d < maxDeg) degTable[d] = x;
-    }
-
-    // Rebuild root list and find new min
-    minNode = nullptr;
-    for (FibNode* node : degTable) {
-        if (!node) continue;
-        node->left = node->right = node;  // isolate before re-adding
-        addToRootList(node);
-    }
-}
-
-void FibonacciHeap::cut(FibNode* x, FibNode* y) {
-    // Remove x from child list of y
-    if (x->right == x) {
-        y->child = nullptr;
-    } else {
-        if (y->child == x) y->child = x->right;
-        x->left->right = x->right;
-        x->right->left = x->left;
-    }
-    y->degree--;
-    addToRootList(x);
-    x->marked = false;
-}
-
-void FibonacciHeap::cascadingCut(FibNode* y) {
-    FibNode* z = y->parent;
-    if (z) {
-        if (!y->marked) y->marked = true;
-        else { cut(y, z); cascadingCut(z); }
-    }
-}
-
 void FibonacciHeap::decreaseKey(Vertex* v) {
-    FibNode* x = nodeMap[v];
-    FibNode* y = x->parent;
-    if (y && x->vertex->getDist() < y->vertex->getDist()) {
-        cut(x, y);
-        cascadingCut(y);
-    }
-    if (v->getDist() < minNode->vertex->getDist())
-        minNode = x;
+    /// Vertex dist was already updated by the caller (Dijkstra/Prim)
+    FibNode* n = nodeMap[v];
+    heap_ = _decreaseKey(heap_, n);
 }
 
 bool FibonacciHeap::empty() {
-    return size_ == 0;
+    return heap_ == nullptr;
 }
