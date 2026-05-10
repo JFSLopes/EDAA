@@ -17,6 +17,7 @@ private:
     std::string defaultEdgesPath = "../graph/edges_clipped.csv";
     std::string exportPath       = "../graph/algorithm_edges.csv";
     std::string visualizerScript = "../graph/primVisualizer.py";
+    std::string vrpVisualizerScript = "../graph/VRP_visualizer.py";
     bool graphLoaded = false;
 
     // ── Menus ────────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ private:
     void runDijkstraFilter();
     void runPrim();
     void runAstar();
+    void runVRP();
 
     // ── Benchmark ────────────────────────────────────────────────────────────
     void benchmarkDijkstra();
@@ -50,7 +52,7 @@ private:
     void printPath(const std::vector<std::shared_ptr<Vertex>>& path,
                    const std::string& label, double elapsed);
 
-    void runVisualizer() const;
+    void runVisualizer(const std::string& script) const;
     void clearScreen() const;
     void printHeader() const;
     void waitEnter() const;

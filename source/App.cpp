@@ -1,13 +1,8 @@
 #include "../header/App.h"
-#include "../header/FibonacciHeap.h"
-#include "../header/MutablePriorityQueue.h"
-#include "../header/BruteForceQueue.h"
-#include "../header/Utils.h"
+#include "../header/VRP.h"
 
 #include <iostream>
-#include <chrono>
 #include <random>
-#include <unordered_set>
 #include <limits>
 #include <cstdlib>
 #include <iomanip>
@@ -145,8 +140,8 @@ std::set<Mode> App::pickModes() {
 // Export & visualize
 // ─────────────────────────────────────────────────────────────────────────────
 
-void App::runVisualizer() const {
-    std::string cmd = PYTHON_INTERPRETER + " " + visualizerScript;
+void App::runVisualizer(const std::string& script) const {
+    std::string cmd = PYTHON_INTERPRETER + " " + script;
     std::cout << "  Running visualizer: " << cmd << "\n";
     int ret = system(cmd.c_str());
     if (ret != 0)
@@ -160,7 +155,7 @@ void App::exportAndVisualize(const std::vector<std::shared_ptr<Vertex>>& path, c
     multigraph.exportPathCSV(path, csvPath);
     std::cout << "  Exported to " << csvPath << "\n";
     if (readYesNo("  Run Python visualizer?"))
-        runVisualizer();
+        runVisualizer(visualizerScript);
 }
 
 void App::printPath(const std::vector<std::shared_ptr<Vertex>>& path,
@@ -318,6 +313,18 @@ void App::runAstar() {
         exportAndVisualize(path, "Astar");
 
     waitEnter();
+}
+
+void App::runVRP() {
+    Quadtree quadtree(multigraph.getVertexSet());
+    VRP vrp(multigraph, quadtree);  // quadtree built once after graph load
+    vrp.loadFromJSON("../VRP/VRP.json");
+    vrp.solve(FIBONACCI_HEAP);
+    vrp.printSolution();
+    if (readYesNo("  Export routes?")) {
+        vrp.exportCSV("../graph");
+        runVisualizer(vrpVisualizerScript);
+    }
 }
 
 void App::runDijkstraFilter() {
@@ -587,14 +594,16 @@ void App::menuAlgorithms() {
     std::cout << "  [2] Dijkstra with mode filter\n";
     std::cout << "  [3] Prim's MST\n";
     std::cout << "  [4] A* (shortest path)\n";
+    std::cout << "  [5] VRP (2-opt)\n";
     std::cout << "  [0] Back\n\n";
 
-    int c = readInt("  > ", 0, 4);
+    int c = readInt("  > ", 0, 5);
     switch (c) {
         case 1: runDijkstra();       break;
         case 2: runDijkstraFilter(); break;
         case 3: runPrim();           break;
-        case 4: runAstar(); break;
+        case 4: runAstar();          break;
+        case 5: runVRP();            break;
         default: break;
     }
 }
