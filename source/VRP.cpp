@@ -311,7 +311,7 @@ void VRP::twoOpt(BusRoute& route) {
                                 + edgeTime(route.stops[i+1].vertex, j+1 < n ? route.stops[j+1].vertex
                                                                             : route.depotVertex);
 
-                if (after < before - 1e-6) {
+                if (after < before - 1e-6) {    // Threshold
                     std::reverse(route.stops.begin() + i + 1,
                                  route.stops.begin() + j + 1);
                     improved = true;

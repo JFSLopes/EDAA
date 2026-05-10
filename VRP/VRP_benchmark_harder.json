@@ -9,6 +9,11 @@
       "id": "bus_2",
       "capacity": 35,
       "depot": { "x": 533500.0, "y": 4558200.0, "name": "Depot Campanha" }
+    },
+    {
+      "id": "bus_3",
+      "capacity": 50,
+      "depot": { "x": 530100.0, "y": 4556800.0, "name": "Depot Trindade" }
     }
   ],
   "requests": [
