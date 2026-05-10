@@ -33,10 +33,10 @@ public:
     [[nodiscard]] std::vector<std::shared_ptr<Vertex>> prim(const std::shared_ptr<Vertex>& s, PriorityQueueSelected pqs) const;
 
     [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;
-    void dijkstra_aux(const std::shared_ptr<Vertex>& src, PriorityQueueSelected pqs) const;
+    void dijkstra_aux(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;
 
     [[nodiscard]] std::vector<std::shared_ptr<Vertex>> dijkstra_filter(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const std::set<Mode>& modes, PriorityQueueSelected pqs) const;
-    void dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes, PriorityQueueSelected pqs) const;
+    void dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const std::set<Mode>& modes, PriorityQueueSelected pqs) const;
 
     [[nodiscard]] std::vector<std::shared_ptr<Vertex>> astar(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;
     void astar_aux(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const;

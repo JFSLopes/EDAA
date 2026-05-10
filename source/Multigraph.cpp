@@ -98,7 +98,7 @@ void Multigraph::exportPathCSV(const std::vector<std::shared_ptr<Vertex>>& path,
 
 std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest, PriorityQueueSelected pqs) const {
     /// Run Dijkstra to get the smaller distances
-    this->dijkstra_aux(src, pqs);
+    this->dijkstra_aux(src, dest, pqs);
 
     std::vector<std::shared_ptr<Vertex>> ans;
 
@@ -113,7 +113,7 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra(const std::shared_ptr<
     return ans;
 }
 
-void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src, PriorityQueueSelected pqs) const {
+void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, PriorityQueueSelected pqs) const {
     std::vector<std::shared_ptr<Vertex>> ans;
     /// Init the values
     for (const std::shared_ptr<Vertex>& v: vertexSet){
@@ -130,6 +130,10 @@ void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src, PriorityQueueS
     while (!q->empty()) {
         /// The vertex on the top is always relaxed, that is why we can add it to the answer.
         Vertex* min = q->extractMin();
+
+        /// Early exit — no need to explore the whole graph
+        if (min == dest.get()) break;
+
         min->setVisited(true);
 
         for (const std::shared_ptr<Edge>& edge : min->getAdj()){
@@ -153,7 +157,7 @@ void Multigraph::dijkstra_aux(const std::shared_ptr<Vertex>& src, PriorityQueueS
 
 std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra_filter(const std::shared_ptr<Vertex> &src, const std::shared_ptr<Vertex> &dest, const std::set<Mode>& modes, PriorityQueueSelected pqs) const {
     /// Run Dijkstra to get the smaller distances
-    this->dijkstra_filter_aux(src, modes, pqs);
+    this->dijkstra_filter_aux(src, dest, modes, pqs);
 
     std::vector<std::shared_ptr<Vertex>> ans;
 
@@ -168,7 +172,7 @@ std::vector<std::shared_ptr<Vertex>> Multigraph::dijkstra_filter(const std::shar
     return ans;
 }
 
-void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::set<Mode>& modes, PriorityQueueSelected pqs) const {
+void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const std::shared_ptr<Vertex>& dest, const std::set<Mode>& modes, PriorityQueueSelected pqs) const {
     std::vector<std::shared_ptr<Vertex>> ans;
     /// Init the values
     for (const std::shared_ptr<Vertex>& v: vertexSet){
@@ -185,6 +189,10 @@ void Multigraph::dijkstra_filter_aux(const std::shared_ptr<Vertex>& src, const s
     while (!q->empty()) {
         /// The vertex on the top is always relaxed, that is why we can add it to the answer.
         Vertex* min = q->extractMin();
+
+        /// Early exit — no need to explore the whole graph
+        if (min == dest.get()) break;
+
         min->setVisited(true);
 
         for (const std::shared_ptr<Edge>& edge : min->getAdj()){
