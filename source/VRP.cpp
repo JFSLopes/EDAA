@@ -203,7 +203,7 @@ void VRP::buildDistanceMatrix(PriorityQueueSelected pqs) {
     // Run A*/Dijkstra from each stop vertex, read off all distances
     for (int i = 0; i < N; i++) {
         auto src = graph.getVertex(stopIndex[i]->getId());
-        graph.dijkstra_filter_aux(src, nullptr, {BUS, WALK}, pqs);           // fills dist on every vertex
+        graph.dijkstra_filter_aux(src, nullptr, {BUS}, pqs);           // fills dist on every vertex
 
         for (int j = 0; j < N; j++) {
             if (i == j) continue;
@@ -555,4 +555,231 @@ void VRP::exportCSV(const std::string& dirpath) const {
 
     std::cout << "  Exported → " << dirpath << "/vrp_routes.csv\n";
     std::cout << "  Exported → " << dirpath << "/vrp_stops.csv\n";
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Brute force — tries all request→bus assignments and all stop orderings
+// Only feasible for small instances (≤ 8 requests)
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool VRP::solveBruteForce() {
+    int R = (int)requests.size();
+    int B = (int)routes.size();
+
+    if (R > 8) {
+        std::cout << "  ⚠  Brute force skipped — too many requests ("
+                  << R << " > 8)\n";
+        return false;
+    }
+
+    // Each request can go to any bus → B^R total assignments
+    double   bestMakespan = std::numeric_limits<double>::max();
+    std::vector<Stop>              bestStops;   // flat best stops per bus
+    std::vector<int>               bestAssign;
+
+    // Resolve all request vertices upfront
+    std::vector<Vertex*> originVerts, destVerts;
+    for (auto& r : requests) {
+        originVerts.push_back(quadtree.nearest(r.origin.x,      r.origin.y));
+        destVerts.push_back  (quadtree.nearest(r.destination.x, r.destination.y));
+    }
+
+    // Iterate all B^R assignments
+    long long totalAssign = 1;
+    for (int i = 0; i < R; i++) totalAssign *= B;
+
+    for (long long mask = 0; mask < totalAssign; mask++) {
+        // Decode assignment: which bus each request goes to
+        std::vector<int> assign(R);
+        long long tmp = mask;
+        for (int i = 0; i < R; i++) { assign[i] = tmp % B; tmp /= B; }
+
+        // Check capacity constraints
+        std::vector<int> busLoad(B, 0);
+        bool feasible = true;
+        for (int i = 0; i < R; i++) {
+            busLoad[assign[i]] += requests[i].people;
+            if (busLoad[assign[i]] > routes[assign[i]].bus.capacity) {
+                feasible = false; break;
+            }
+        }
+        if (!feasible) continue;
+
+        // For each bus, try all orderings of its assigned stops
+        // Each request contributes 2 stops (pickup + dropoff)
+        // We permute the stop sequence and keep best per bus
+        double totalMakespan = 0.0;
+        bool validAssign = true;
+
+        std::vector<std::vector<Stop>> busStops(B);
+        for (int i = 0; i < R; i++) {
+            int b = assign[i];
+            busStops[b].push_back({ requests[i].id, originVerts[i], true,  requests[i].people });
+            busStops[b].push_back({ requests[i].id, destVerts[i],   false, requests[i].people });
+        }
+
+        for (int b = 0; b < B; b++) {
+            if (busStops[b].empty()) continue;
+
+            // Generate all permutations of this bus's stops
+            std::vector<int> perm(busStops[b].size());
+            std::iota(perm.begin(), perm.end(), 0);
+
+            double bestBusTime = std::numeric_limits<double>::max();
+            do {
+                // Compute route time for this permutation
+                double t = edgeTime(routes[b].depotVertex,
+                                    busStops[b][perm[0]].vertex);
+                for (int s = 0; s + 1 < (int)perm.size(); s++)
+                    t += edgeTime(busStops[b][perm[s]].vertex,
+                                  busStops[b][perm[s+1]].vertex);
+                if (t < bestBusTime) bestBusTime = t;
+            } while (std::next_permutation(perm.begin(), perm.end()));
+
+            if (bestBusTime == std::numeric_limits<double>::max()) {
+                validAssign = false; break;
+            }
+            totalMakespan = std::max(totalMakespan, bestBusTime);
+        }
+
+        if (!validAssign) continue;
+        if (totalMakespan < bestMakespan) {
+            bestMakespan = totalMakespan;
+            bestAssign   = assign;
+        }
+    }
+
+    if (bestAssign.empty()) return false;
+
+    // Rebuild routes with the best assignment found, using best ordering
+    for (auto& r : routes) { r.stops.clear(); r.load = 0; }
+
+    std::vector<Vertex*> oV(R), dV(R);
+    for (int i = 0; i < R; i++) {
+        oV[i] = quadtree.nearest(requests[i].origin.x,      requests[i].origin.y);
+        dV[i] = quadtree.nearest(requests[i].destination.x, requests[i].destination.y);
+    }
+
+    // Re-assign and find best ordering per bus for the best assignment
+    std::vector<std::vector<Stop>> busStops(B);
+    for (int i = 0; i < R; i++) {
+        int b = bestAssign[i];
+        busStops[b].push_back({ requests[i].id, oV[i], true,  requests[i].people });
+        busStops[b].push_back({ requests[i].id, dV[i], false, requests[i].people });
+        routes[b].load += requests[i].people;
+    }
+
+    for (int b = 0; b < B; b++) {
+        if (busStops[b].empty()) continue;
+        std::vector<int> perm(busStops[b].size());
+        std::iota(perm.begin(), perm.end(), 0);
+
+        double bestTime = std::numeric_limits<double>::max();
+        std::vector<int> bestPerm;
+        do {
+            double t = edgeTime(routes[b].depotVertex, busStops[b][perm[0]].vertex);
+            for (int s = 0; s + 1 < (int)perm.size(); s++)
+                t += edgeTime(busStops[b][perm[s]].vertex,
+                              busStops[b][perm[s+1]].vertex);
+            if (t < bestTime) { bestTime = t; bestPerm = perm; }
+        } while (std::next_permutation(perm.begin(), perm.end()));
+
+        for (int idx : bestPerm)
+            routes[b].stops.push_back(busStops[b][idx]);
+        routes[b].time = bestTime;
+    }
+
+    makespan = bestMakespan;
+    feasible = true;
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// solveAndBenchmark — runs both approaches and compares
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool VRP::solveAndBenchmark(PriorityQueueSelected pqs) {
+    const std::string SEP = "  " + std::string(62, '=') + "\n";
+
+    // Build the distance matrix once — shared by both solvers
+    std::cout << "\n  Building distance matrix (shared)...\n";
+    buildDistanceMatrix(pqs);
+
+    // ── Greedy + 2-opt ────────────────────────────────────────────────────────
+    std::cout << "\n" << SEP;
+    std::cout << "  APPROACH 1 — Greedy + 2-opt\n";
+    std::cout << SEP;
+
+    for (auto& r : routes) { r.stops.clear(); r.load = 0; r.time = 0; }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    greedyAssign();
+    for (auto& route : routes) { twoOpt(route); route.time = routeTime(route); }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double elapsedGreedy = std::chrono::duration<double>(t1 - t0).count();
+
+    double makespanGreedy = 0.0;
+    for (auto& r : routes) makespanGreedy = std::max(makespanGreedy, r.time);
+
+    std::cout << "  Makespan : " << fmtTime(makespanGreedy) << "\n";
+    std::cout << "  Elapsed  : " << std::fixed << std::setprecision(4)
+              << elapsedGreedy << "s\n";
+    printSolution();
+
+    // ── Brute force ───────────────────────────────────────────────────────────
+    std::cout << "\n" << SEP;
+    std::cout << "  APPROACH 2 — Brute Force (exact)\n";
+    std::cout << SEP;
+
+    for (auto& r : routes) { r.stops.clear(); r.load = 0; r.time = 0; }
+    makespan = 0.0; feasible = false;
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+    bool bfFeasible = solveBruteForce();
+    auto t3 = std::chrono::high_resolution_clock::now();
+    double elapsedBF = std::chrono::duration<double>(t3 - t2).count();
+
+    if (bfFeasible) {
+        std::cout << "  Makespan : " << fmtTime(makespan) << "\n";
+        std::cout << "  Elapsed  : " << std::fixed << std::setprecision(4)
+                  << elapsedBF << "s\n";
+        printSolution();
+    }
+
+    // ── Comparison ────────────────────────────────────────────────────────────
+    std::cout << "\n" << SEP;
+    std::cout << "  BENCHMARK SUMMARY\n";
+    std::cout << SEP;
+    std::cout << "  " << std::left
+              << std::setw(28) << "Approach"
+              << std::setw(18) << "Makespan"
+              << "Time\n";
+    std::cout << "  " << std::string(58, '-') << "\n";
+    std::cout << "  " << std::setw(28) << "Greedy + 2-opt"
+              << std::setw(18) << fmtTime(makespanGreedy)
+              << std::fixed << std::setprecision(4) << elapsedGreedy << "s\n";
+
+    if (bfFeasible) {
+        std::cout << "  " << std::setw(28) << "Brute force (exact)"
+                  << std::setw(18) << fmtTime(makespan)
+                  << std::fixed << std::setprecision(4) << elapsedBF << "s\n";
+
+        std::cout << "\n";
+        double gap = 100.0 * (makespanGreedy - makespan) / makespan;
+        if (gap <= 0.01)
+            std::cout << "  ✓ Greedy found the OPTIMAL solution\n";
+        else
+            std::cout << "  Greedy is " << std::fixed << std::setprecision(2)
+                      << gap << "% above optimal  ("
+                      << fmtTime(makespanGreedy - makespan) << " slower makespan)\n";
+
+        std::cout << "  Brute force was "
+                  << std::fixed << std::setprecision(1)
+                  << (elapsedBF / std::max(elapsedGreedy, 1e-9))
+                  << "x slower to compute\n";
+    }
+    std::cout << SEP;
+
+    return bfFeasible || (makespanGreedy < std::numeric_limits<double>::max());
 }

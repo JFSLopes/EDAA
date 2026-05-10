@@ -41,6 +41,7 @@ private:
     void benchmarkDijkstra();
     void benchmarkPrim();
     void benchmarkAstarVsDijkstra();
+    void benchmarkVRP();
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     std::shared_ptr<Vertex> pickVertex(const std::string& prompt);

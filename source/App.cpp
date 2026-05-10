@@ -316,9 +316,22 @@ void App::runAstar() {
 }
 
 void App::runVRP() {
-    Quadtree quadtree(multigraph.getVertexSet());
-    VRP vrp(multigraph, quadtree);  // quadtree built once after graph load
-    vrp.loadFromJSON("../VRP/VRP.json");
+    // Only include vertices that have at least one BUS edge
+    std::vector<std::shared_ptr<Vertex>> busNodes;
+    for (const auto& v : multigraph.getVertexSet()) {
+        for (const auto& e : v->getAdj()) {
+            if (e->getMode() == BUS) {
+                busNodes.push_back(v);
+                break;
+            }
+        }
+    }
+    std::cout << "  Bus nodes: " << busNodes.size() << " / "
+              << multigraph.getVertexSet().size() << "\n";
+
+    Quadtree quadtree(busNodes);
+    VRP vrp(multigraph, quadtree);
+    vrp.loadFromJSON("../VRP/VRP_benchmark_harder.json");
     vrp.solve(FIBONACCI_HEAP);
     vrp.printSolution();
     if (readYesNo("  Export routes?")) {
@@ -549,6 +562,33 @@ void App::benchmarkPrim() {
     waitEnter();
 }
 
+void App::benchmarkVRP() {
+    if (!requireGraph()) return;
+
+    std::vector<std::shared_ptr<Vertex>> busNodes;
+    for (const auto& v : multigraph.getVertexSet())
+        for (const auto& e : v->getAdj())
+            if (e->getMode() == BUS) { busNodes.push_back(v); break; }
+
+    Quadtree quadtree(busNodes);
+    VRP vrp(multigraph, quadtree);
+    vrp.loadFromJSON("../VRP/VRP_benchmark_harder.json");
+
+    int R = (int) /* expose requests.size() or just warn */ 0;
+    std::cout << "  Note: brute force is exact but capped at 8 requests.\n";
+    std::cout << "        With N requests: "
+              << "assignments=" << "B^N"
+              << "  orderings=(2N)! per bus\n\n";
+
+    vrp.solveAndBenchmark(FIBONACCI_HEAP);
+
+    if (readYesNo("  Export best solution?")) {
+        vrp.exportCSV("../graph");
+        runVisualizer(vrpVisualizerScript);
+    }
+    waitEnter();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Menus
 // ─────────────────────────────────────────────────────────────────────────────
@@ -615,13 +655,15 @@ void App::menuBenchmark() {
     std::cout << "  [1] Dijkstra — compare all priority queues\n";
     std::cout << "  [2] Prim    — compare all priority queues\n";
     std::cout << "  [3] A* vs Dijkstra\n";
+    std::cout << "  [4] VRP - Benchmark greedy vs brute force\n";
     std::cout << "  [0] Back\n\n";
 
-    int c = readInt("  > ", 0, 3);
+    int c = readInt("  > ", 0, 4);
     switch (c) {
         case 1: benchmarkDijkstra(); break;
         case 2: benchmarkPrim();     break;
         case 3: benchmarkAstarVsDijkstra(); break;
+        case 4: benchmarkVRP(); break;
         default: break;
     }
 }

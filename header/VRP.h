@@ -86,6 +86,8 @@ public:
     [[nodiscard]] double getMakespan() const { return makespan; }
     [[nodiscard]] bool   isFeasible()  const { return feasible; }
 
+    bool solveAndBenchmark(PriorityQueueSelected pqs = FIBONACCI_HEAP);
+
 private:
     const Multigraph& graph;
     const Quadtree&   quadtree;
@@ -108,6 +110,8 @@ private:
     void twoOpt(BusRoute& route);
     double routeTime(const BusRoute& route) const;
     double edgeTime(Vertex* a, Vertex* b) const;
+    bool solveBruteForce();
+    double evaluateAssignment(const std::vector<int>& assignment, const std::vector<std::vector<int>>& orderings) const;
 };
 
 #endif //EDAA_VRP_H
