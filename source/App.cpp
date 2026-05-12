@@ -948,7 +948,7 @@ void App::menuAlgorithms() {
     std::cout << "  [2] Dijkstra with mode filter\n";
     std::cout << "  [3] Prim's MST\n";
     std::cout << "  [4] A* (shortest path)\n";
-    std::cout << "  [5] COLORING (2-opt)\n";
+    std::cout << "  [5] COLORING (welsh powell & Brute force)\n";
     std::cout << "  [0] Back\n\n";
 
     int c = readInt("  > ", 0, 5);
@@ -969,7 +969,7 @@ void App::menuBenchmark() {
     std::cout << "  [1] Dijkstra — compare all priority queues\n";
     std::cout << "  [2] Prim    — compare all priority queues\n";
     std::cout << "  [3] A* vs Dijkstra\n";
-    std::cout << "  [4] COLORING - Benchmark greedy vs brute force\n";
+    std::cout << "  [4] COLORING - Benchmark welsh powell vs brute force\n";
     std::cout << "  [0] Back\n\n";
 
     int c = readInt("  > ", 0, 4);
