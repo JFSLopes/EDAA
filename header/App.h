@@ -17,7 +17,7 @@ private:
     std::string defaultEdgesPath = "../graph/edges_clipped.csv";
     std::string exportPath       = "../graph/algorithm_edges.csv";
     std::string visualizerScript = "../graph/primVisualizer.py";
-    std::string vrpVisualizerScript = "../graph/VRP_visualizer.py";
+    std::string tspVisualizerScript = "../graph/TSP_visualizer.py";
     bool graphLoaded = false;
 
     // ── Menus ────────────────────────────────────────────────────────────────
@@ -35,13 +35,13 @@ private:
     void runDijkstraFilter();
     void runPrim();
     void runAstar();
-    void runVRP();
+    void runColoring();
 
     // ── Benchmark ────────────────────────────────────────────────────────────
     void benchmarkDijkstra();
     void benchmarkPrim();
     void benchmarkAstarVsDijkstra();
-    void benchmarkVRP();
+    void benchmarkColoring();
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     std::shared_ptr<Vertex> pickVertex(const std::string& prompt);

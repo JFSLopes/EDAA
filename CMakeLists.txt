@@ -15,5 +15,5 @@ add_executable(EDAA main.cpp
         source/BruteForceQueue.cpp
         source/App.cpp
         source/Quadtree.cpp
-        source/VRP.cpp
+        source/Coloring.cpp
 )

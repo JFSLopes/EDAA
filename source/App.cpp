@@ -1,5 +1,5 @@
 #include "../header/App.h"
-#include "../header/VRP.h"
+#include "../header/Coloring.h"
 
 #include <iostream>
 #include <random>
@@ -315,29 +315,173 @@ void App::runAstar() {
     waitEnter();
 }
 
-void App::runVRP() {
-    // Only include vertices that have at least one BUS edge
-    std::vector<std::shared_ptr<Vertex>> busNodes;
-    for (const auto& v : multigraph.getVertexSet()) {
-        for (const auto& e : v->getAdj()) {
-            if (e->getMode() == BUS) {
-                busNodes.push_back(v);
-                break;
+void App::runColoring() {
+    clearScreen();
+    printHeader();
+
+    std::cout << "  Graph Coloring - Channel Assignment\n\n";
+    std::cout << "  [1] COLORING/coloring.json\n";
+    std::cout << "  [2] COLORING/coloring_benchmark.json\n";
+    std::cout << "  [3] COLORING/coloring_benchmark_harder.json\n";
+    std::cout << "  [4] Custom JSON path\n";
+    std::cout << "  [0] Back\n\n";
+
+    int fileChoice = readInt("  > ", 0, 4);
+    if (fileChoice == 0) return;
+
+    std::string jsonPath;
+    switch (fileChoice) {
+        case 1: jsonPath = "../COLORING/coloring.json"; break;
+        case 2: jsonPath = "../COLORING/coloring_benchmark.json"; break;
+        case 3: jsonPath = "../COLORING/coloring_benchmark_harder.json"; break;
+        case 4:
+            std::cout << "  JSON path: ";
+            std::getline(std::cin, jsonPath);
+            break;
+    }
+
+    std::cout << "\n  Select coloring algorithm\n";
+    std::cout << "  [1] Brute Force exact coloring\n";
+    std::cout << "  [2] Welsh-Powell heuristic\n";
+    std::cout << "  [3] Run both\n";
+
+    int algChoice = readInt("  > ", 1, 3);
+
+    try {
+        Coloring coloring;
+
+        auto loadT0 = std::chrono::high_resolution_clock::now();
+        coloring.loadFromJson(jsonPath);
+        auto loadT1 = std::chrono::high_resolution_clock::now();
+
+        double loadElapsed =
+                std::chrono::duration<double>(loadT1 - loadT0).count();
+
+        std::cout << "  Antennas       : " << coloring.getAntennaCount() << "\n";
+        std::cout << "  Conflict edges : " << coloring.getConflictEdgeCount() << "\n";
+
+        double n = coloring.getAntennaCount();
+        double maxEdges = n * (n - 1.0) / 2.0;
+        double density = coloring.getConflictEdgeCount() / maxEdges;
+
+        std::cout << "  Density        : "
+                  << std::fixed << std::setprecision(4)
+                  << density * 100.0 << "%\n";
+
+        std::cout << "\n  Loaded coloring instance from " << jsonPath << "\n";
+        std::cout << "  Antennas            : " << coloring.getAntennaCount() << "\n";
+        std::cout << "  Conflict edges      : " << coloring.getConflictEdgeCount() << "\n";
+        std::cout << "  Interference radius : "
+                  << std::fixed << std::setprecision(2)
+                  << coloring.getInterferenceRadius() << "\n";
+        std::cout << "  Load/build time     : "
+                  << std::fixed << std::setprecision(5)
+                  << loadElapsed << "s\n";
+
+        Coloring::Solution bruteSol;
+        Coloring::Solution heuristicSol;
+
+        bool hasBrute = false;
+        bool hasHeuristic = false;
+
+        if (algChoice == 1 || algChoice == 3) {
+            if (coloring.getAntennaCount() > 22) {
+                std::cout << "\n  Warning: brute force with "
+                          << coloring.getAntennaCount()
+                          << " antennas can be very slow.\n";
+
+                if (!readYesNo("  Continue with brute force?")) {
+                    if (algChoice == 1) {
+                        waitEnter();
+                        return;
+                    }
+                } else {
+                    std::cout << "\n  Running Brute Force...\n";
+
+                    auto t0 = std::chrono::high_resolution_clock::now();
+                    bruteSol = coloring.solveBruteForce();
+                    auto t1 = std::chrono::high_resolution_clock::now();
+
+                    double elapsed =
+                            std::chrono::duration<double>(t1 - t0).count();
+
+                    std::cout << "\n  ── Coloring Brute Force ────────────────\n";
+                    std::cout << "  Elapsed    : "
+                              << std::fixed << std::setprecision(5)
+                              << elapsed << "s\n";
+                    coloring.printSolution(bruteSol);
+
+                    hasBrute = true;
+                }
+            } else {
+                std::cout << "\n  Running Brute Force...\n";
+
+                auto t0 = std::chrono::high_resolution_clock::now();
+                bruteSol = coloring.solveBruteForce();
+                auto t1 = std::chrono::high_resolution_clock::now();
+
+                double elapsed =
+                        std::chrono::duration<double>(t1 - t0).count();
+
+                std::cout << "\n  ── Coloring Brute Force ────────────────\n";
+                std::cout << "  Elapsed    : "
+                          << std::fixed << std::setprecision(5)
+                          << elapsed << "s\n";
+                coloring.printSolution(bruteSol);
+
+                hasBrute = true;
             }
         }
-    }
-    std::cout << "  Bus nodes: " << busNodes.size() << " / "
-              << multigraph.getVertexSet().size() << "\n";
 
-    Quadtree quadtree(busNodes);
-    VRP vrp(multigraph, quadtree);
-    vrp.loadFromJSON("../VRP/VRP_benchmark_harder.json");
-    vrp.solve(FIBONACCI_HEAP);
-    vrp.printSolution();
-    if (readYesNo("  Export routes?")) {
-        vrp.exportCSV("../graph");
-        runVisualizer(vrpVisualizerScript);
+        if (algChoice == 2 || algChoice == 3) {
+            std::cout << "\n  Running Welsh-Powell heuristic...\n";
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            heuristicSol = coloring.solveWelshPowell();
+            auto t1 = std::chrono::high_resolution_clock::now();
+
+            double elapsed =
+                    std::chrono::duration<double>(t1 - t0).count();
+
+            std::cout << "\n  ── Coloring Welsh-Powell ───────────────\n";
+            std::cout << "  Elapsed    : "
+                      << std::fixed << std::setprecision(5)
+                      << elapsed << "s\n";
+            coloring.printSolution(heuristicSol);
+
+            hasHeuristic = true;
+        }
+
+        Coloring::Solution exportSol;
+
+        if (hasBrute && bruteSol.feasible) {
+            exportSol = bruteSol;
+            std::cout << "\n  Exporting Brute Force solution.\n";
+        } else if (hasHeuristic && heuristicSol.feasible) {
+            exportSol = heuristicSol;
+            std::cout << "\n  Exporting Welsh-Powell solution.\n";
+        } else {
+            std::cout << "\n  No feasible solution to export.\n";
+            waitEnter();
+            return;
+        }
+
+        coloring.exportCSV(
+                exportSol,
+                "../graph/coloring_vertices.csv",
+                "../graph/coloring_edges.csv"
+        );
+
+        std::cout << "  Exported vertices to ../graph/coloring_vertices.csv\n";
+        std::cout << "  Exported edges to ../graph/coloring_edges.csv\n";
+
+        runVisualizer("../graph/Coloring_visualizer.py");
+
+    } catch (const std::exception& e) {
+        std::cout << "\n  Coloring error: " << e.what() << "\n";
     }
+
+    waitEnter();
 }
 
 void App::runDijkstraFilter() {
@@ -562,30 +706,200 @@ void App::benchmarkPrim() {
     waitEnter();
 }
 
-void App::benchmarkVRP() {
-    if (!requireGraph()) return;
+void App::benchmarkColoring() {
+    clearScreen();
+    printHeader();
 
-    std::vector<std::shared_ptr<Vertex>> busNodes;
-    for (const auto& v : multigraph.getVertexSet())
-        for (const auto& e : v->getAdj())
-            if (e->getMode() == BUS) { busNodes.push_back(v); break; }
+    std::cout << "  Coloring Benchmark - Brute Force vs Welsh-Powell\n\n";
+    std::cout << "  [1] COLORING/coloring.json\n";
+    std::cout << "  [2] COLORING/coloring_benchmark.json\n";
+    std::cout << "  [3] COLORING/coloring_benchmark_harder.json\n";
+    std::cout << "  [4] Custom JSON path\n";
+    std::cout << "  [0] Back\n\n";
 
-    Quadtree quadtree(busNodes);
-    VRP vrp(multigraph, quadtree);
-    vrp.loadFromJSON("../VRP/VRP_benchmark_harder.json");
+    int fileChoice = readInt("  > ", 0, 4);
+    if (fileChoice == 0) return;
 
-    int R = (int) /* expose requests.size() or just warn */ 0;
-    std::cout << "  Note: brute force is exact but capped at 8 requests.\n";
-    std::cout << "        With N requests: "
-              << "assignments=" << "B^N"
-              << "  orderings=(2N)! per bus\n\n";
-
-    vrp.solveAndBenchmark(FIBONACCI_HEAP);
-
-    if (readYesNo("  Export best solution?")) {
-        vrp.exportCSV("../graph");
-        runVisualizer(vrpVisualizerScript);
+    std::string jsonPath;
+    switch (fileChoice) {
+        case 1: jsonPath = "../COLORING/coloring.json"; break;
+        case 2: jsonPath = "../COLORING/coloring_benchmark.json"; break;
+        case 3: jsonPath = "../COLORING/coloring_benchmark_harder.json"; break;
+        case 4:
+            std::cout << "  JSON path: ";
+            std::getline(std::cin, jsonPath);
+            break;
     }
+
+    try {
+        Coloring coloring;
+
+        auto loadT0 = std::chrono::high_resolution_clock::now();
+        coloring.loadFromJson(jsonPath);
+        auto loadT1 = std::chrono::high_resolution_clock::now();
+
+        double loadElapsed =
+                std::chrono::duration<double>(loadT1 - loadT0).count();
+
+        std::cout << "\n  Loaded coloring benchmark instance\n";
+        std::cout << "  File                : " << jsonPath << "\n";
+        std::cout << "  Antennas            : " << coloring.getAntennaCount() << "\n";
+        std::cout << "  Conflict edges      : " << coloring.getConflictEdgeCount() << "\n";
+        std::cout << "  Interference radius : "
+                  << std::fixed << std::setprecision(2)
+                  << coloring.getInterferenceRadius() << "\n";
+        std::cout << "  Load/build time     : "
+                  << std::fixed << std::setprecision(5)
+                  << loadElapsed << "s\n";
+
+        struct Result {
+            std::string name;
+            double elapsed;
+            int colorsUsed;
+            bool feasible;
+            Coloring::Solution solution;
+        };
+
+        std::vector<Result> results;
+
+        bool runBrute = true;
+
+        if (coloring.getAntennaCount() > 22) {
+            std::cout << "\n  Brute force warning: "
+                      << coloring.getAntennaCount()
+                      << " antennas can be very slow.\n";
+
+            runBrute = readYesNo("  Run brute force anyway?");
+        }
+
+        if (runBrute) {
+            std::cout << "\n  Running Brute Force...\n";
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            auto sol = coloring.solveBruteForce();
+            auto t1 = std::chrono::high_resolution_clock::now();
+
+            double elapsed =
+                    std::chrono::duration<double>(t1 - t0).count();
+
+            results.push_back({
+                                      "Brute Force",
+                                      elapsed,
+                                      sol.colorsUsed,
+                                      sol.feasible,
+                                      sol
+                              });
+
+            std::cout << "  Brute Force done.\n";
+        } else {
+            std::cout << "  Brute Force skipped.\n";
+        }
+
+        std::cout << "\n  Running Welsh-Powell heuristic...\n";
+
+        auto h0 = std::chrono::high_resolution_clock::now();
+        auto heuristicSol = coloring.solveWelshPowell();
+        auto h1 = std::chrono::high_resolution_clock::now();
+
+        double heuristicElapsed =
+                std::chrono::duration<double>(h1 - h0).count();
+
+        results.push_back({
+                                  "Welsh-Powell",
+                                  heuristicElapsed,
+                                  heuristicSol.colorsUsed,
+                                  heuristicSol.feasible,
+                                  heuristicSol
+                          });
+
+        std::cout << "  Welsh-Powell done.\n";
+
+        std::cout << "\n  ── Coloring Benchmark Results ─────────\n";
+        std::cout << std::left
+                  << std::setw(18) << "  Algorithm"
+                  << std::setw(14) << "Time (s)"
+                  << std::setw(12) << "Colors"
+                  << "Valid\n";
+
+        std::cout << "  " << std::string(50, '-') << "\n";
+
+        for (const auto& r : results) {
+            std::cout << "  "
+                      << std::setw(16) << r.name
+                      << std::setw(14)
+                      << std::fixed << std::setprecision(6)
+                      << r.elapsed
+                      << std::setw(12)
+                      << r.colorsUsed
+                      << (r.feasible ? "yes" : "no")
+                      << "\n";
+        }
+
+        if (results.size() == 2 &&
+            results[0].feasible &&
+            results[1].feasible &&
+            results[0].colorsUsed > 0 &&
+            results[1].colorsUsed > 0) {
+
+            const Result& brute = results[0];
+            const Result& heuristic = results[1];
+
+            double speedup = brute.elapsed / heuristic.elapsed;
+            double gap =
+                    ((double)heuristic.colorsUsed - brute.colorsUsed)
+                    / brute.colorsUsed * 100.0;
+
+            std::cout << "\n  Welsh-Powell speedup over brute force: "
+                      << std::fixed << std::setprecision(2)
+                      << speedup << "x\n";
+
+            std::cout << "  Welsh-Powell color gap vs optimal: "
+                      << std::fixed << std::setprecision(2)
+                      << gap << "%\n";
+        }
+
+        Coloring::Solution exportSol;
+        bool foundExport = false;
+
+        for (const auto& r : results) {
+            if (r.name == "Brute Force" && r.feasible) {
+                exportSol = r.solution;
+                foundExport = true;
+                std::cout << "\n  Exporting Brute Force solution.\n";
+                break;
+            }
+        }
+
+        if (!foundExport) {
+            for (const auto& r : results) {
+                if (r.name == "Welsh-Powell" && r.feasible) {
+                    exportSol = r.solution;
+                    foundExport = true;
+                    std::cout << "\n  Exporting Welsh-Powell solution.\n";
+                    break;
+                }
+            }
+        }
+
+        if (foundExport) {
+            coloring.exportCSV(
+                    exportSol,
+                    "../graph/coloring_vertices.csv",
+                    "../graph/coloring_edges.csv"
+            );
+
+            std::cout << "  Exported vertices to ../graph/coloring_vertices.csv\n";
+            std::cout << "  Exported edges to ../graph/coloring_edges.csv\n";
+
+            runVisualizer("../graph/Coloring_visualizer.py");
+        } else {
+            std::cout << "\n  No feasible solution to export.\n";
+        }
+
+    } catch (const std::exception& e) {
+        std::cout << "\n  Coloring benchmark error: " << e.what() << "\n";
+    }
+
     waitEnter();
 }
 
@@ -634,7 +948,7 @@ void App::menuAlgorithms() {
     std::cout << "  [2] Dijkstra with mode filter\n";
     std::cout << "  [3] Prim's MST\n";
     std::cout << "  [4] A* (shortest path)\n";
-    std::cout << "  [5] VRP (2-opt)\n";
+    std::cout << "  [5] COLORING (2-opt)\n";
     std::cout << "  [0] Back\n\n";
 
     int c = readInt("  > ", 0, 5);
@@ -643,7 +957,7 @@ void App::menuAlgorithms() {
         case 2: runDijkstraFilter(); break;
         case 3: runPrim();           break;
         case 4: runAstar();          break;
-        case 5: runVRP();            break;
+        case 5: runColoring();            break;
         default: break;
     }
 }
@@ -655,7 +969,7 @@ void App::menuBenchmark() {
     std::cout << "  [1] Dijkstra — compare all priority queues\n";
     std::cout << "  [2] Prim    — compare all priority queues\n";
     std::cout << "  [3] A* vs Dijkstra\n";
-    std::cout << "  [4] VRP - Benchmark greedy vs brute force\n";
+    std::cout << "  [4] COLORING - Benchmark greedy vs brute force\n";
     std::cout << "  [0] Back\n\n";
 
     int c = readInt("  > ", 0, 4);
@@ -663,7 +977,7 @@ void App::menuBenchmark() {
         case 1: benchmarkDijkstra(); break;
         case 2: benchmarkPrim();     break;
         case 3: benchmarkAstarVsDijkstra(); break;
-        case 4: benchmarkVRP(); break;
+        case 4: benchmarkColoring(); break;
         default: break;
     }
 }

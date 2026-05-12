@@ -23,7 +23,7 @@ struct AABB {
 /**
  * Point-region Quadtree over the Multigraph vertex set.
  *
- * Provides O(log n) nearest-neighbour lookup — used by the VRP solver
+ * Provides O(log n) nearest-neighbour lookup — used by the COLORING solver
  * to map arbitrary UTM coordinates to real graph stops.
  */
 class Quadtree {
