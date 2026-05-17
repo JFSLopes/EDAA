@@ -49,15 +49,12 @@ static std::unique_ptr<PriorityQueue> makePQ(PriorityQueueSelected pqs) {
 
     switch (pqs) {
         case FIBONACCI_HEAP:
-            std::cout << "Running FIBONACCI HEAP\n";
             return std::make_unique<FibonacciHeap>();
 
         case MUTABLE_PRIORITY_QUEUE:
-            std::cout << "Running MUTABLE PRIORITY QUEUE\n";
             return std::make_unique<MutablePriorityQueue>();
 
         case BRUTE_FORCE:
-            std::cout << "Running BRUTE FORCE HEAP\n";
             return std::make_unique<BruteForceQueue>();
     }
 }
