@@ -294,7 +294,7 @@ void BenchmarkHardware::runPrimCache() {
     }
 
     const std::vector<int> nodeCounts = {
-            1000, 2000, 5000, 10000
+            1000, 2000, 5000, 10000, 20000
     };
 
     const std::vector<int> avgDegrees = {
@@ -455,7 +455,7 @@ void BenchmarkHardware::runDijkstraCache() {
     }
 
     const std::vector<int> nodeCounts = {
-            1000, 2000, 5000, 10000
+            1000, 2000, 5000, 10000, 20000
     };
 
     const std::vector<int> avgDegrees = {

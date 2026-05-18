@@ -1,4 +1,7 @@
 #include "../header/App.h"
+
+#include <algorithm>
+
 #include "../header/Coloring.h"
 
 #include <iostream>
@@ -6,6 +9,7 @@
 #include <limits>
 #include <cstdlib>
 #include <iomanip>
+#include <chrono>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
