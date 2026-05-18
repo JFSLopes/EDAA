@@ -1,19 +1,14 @@
 #include "../header/Benchmark.h"
-#include "../header/FibonacciHeap.h"
-#include "../header/MutablePriorityQueue.h"
-#include "../header/BruteForceQueue.h"
 
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <random>
-#include <numeric>
 #include <algorithm>
 #include <filesystem>
 #include <set>
 #include <cfloat>
-#include <thread>
 #include <atomic>
 #include <future>
 
@@ -67,6 +62,7 @@ void Benchmark::writeAllCSVs() const {
     writeCSV("priority_queues.csv", filter("priority_queues"));
     writeCSV("coloring.csv",        filter("coloring"));
     writeCSV("quadtree.csv",        filter("quadtree"));
+    writeCSV("prim.csv",            filter("prim"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -575,168 +571,441 @@ void Benchmark::runColoring() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void Benchmark::runQuadtree() {
-    std::cout << "\n== Quadtree vs BruteForce — Interference Graph Construction ==\n";
+    std::cout << "\n== Quadtree vs BruteForce — Connectivity Sweep ==\n";
 
-    for (double radius : cfg.quadtreeRadii) {
-        std::cout << "  radius=" << (int)radius << "m\n";
+    // We do not need huge graphs to find the degradation point.
+    // A fixed N makes the effect of connectivity/radius easier to see.
+    const std::vector<int> nodeCounts = { 5000, 10000 };
 
-        for (int N : cfg.quadtreeNodeCounts) {
-            // Generate N random antennas
+    const double width  = cfg.coordMaxX - cfg.coordMinX;
+    const double height = cfg.coordMaxY - cfg.coordMinY;
+    const double base   = std::min(width, height);
+
+    // Connectivity sweep.
+    // If your coordinate range is 0..10000, this gives:
+    // 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000
+    const std::vector<double> radiusFactors = {
+            0.005, 0.010, 0.020, 0.030, 0.050,
+            0.075, 0.100, 0.150, 0.200, 0.300
+    };
+
+    bool globalFoundBreakingPoint = false;
+
+    for (int N : nodeCounts) {
+        std::cout << "\n  N=" << N << "\n";
+
+        bool foundBreakingPointForN = false;
+        double breakingAvgDegree = -1.0;
+        double breakingRadius = -1.0;
+
+        for (double factor : radiusFactors) {
+            double radius = base * factor;
+
             std::mt19937 rng(cfg.quadtreeRngSeed + N + (int)radius);
             std::uniform_real_distribution<double>
                     rx(cfg.coordMinX, cfg.coordMaxX),
                     ry(cfg.coordMinY, cfg.coordMaxY);
 
-            struct Point { double x, y; };
+            struct Point {
+                double x;
+                double y;
+            };
+
             std::vector<Point> pts(N);
             std::vector<std::shared_ptr<Vertex>> verts;
             verts.reserve(N);
+
             for (int i = 0; i < N; i++) {
                 pts[i] = { rx(rng), ry(rng) };
                 verts.push_back(std::make_shared<Vertex>(
-                        i, pts[i].x, pts[i].y, "ap_" + std::to_string(i)));
+                        i,
+                        pts[i].x,
+                        pts[i].y,
+                        "ap_" + std::to_string(i)
+                ));
             }
 
-            // ── Quadtree: build + range query for every node ──────────────
-            long edgesQt = 0;
+            // ─────────────────────────────────────────────────────────────
+            // Quadtree: build + query every node
+            // ─────────────────────────────────────────────────────────────
+            long long edgesQt = 0;
             double buildTime = 0.0;
-            double elapsed_qt = timed([&]{
+            QuadtreeStats qtStats;
+
+            double elapsedQt = timed([&] {
                 std::unique_ptr<Quadtree> qt;
-                buildTime = timed([&]{ qt = std::make_unique<Quadtree>(verts); });
+
+                buildTime = timed([&] {
+                    qt = std::make_unique<Quadtree>(verts);
+                });
+
                 for (int i = 0; i < N; i++) {
-                    auto neighbours = qt->rangeSearch(pts[i].x, pts[i].y, radius);
-                    for (auto* nb : neighbours)
-                        if ((int)nb->getId() > i) edgesQt++;
+                    auto neighbours = qt->rangeSearch(
+                            pts[i].x,
+                            pts[i].y,
+                            radius,
+                            qtStats
+                    );
+
+                    for (auto* nb : neighbours) {
+                        if ((int)nb->getId() > i) {
+                            edgesQt++;
+                        }
+                    }
                 }
             });
 
+            double qtChecksPerSecond =
+                    elapsedQt > 0.0
+                    ? (double)qtStats.distanceChecks / elapsedQt
+                    : 0.0;
+
+            // ─────────────────────────────────────────────────────────────
+            // Brute force: check every pair
+            // ─────────────────────────────────────────────────────────────
+            long long edgesBf = 0;
+            long long bruteForceChecks = 0;
+
+            double elapsedBf = timed([&] {
+                double r2 = radius * radius;
+
+                for (int i = 0; i < N; i++) {
+                    for (int j = i + 1; j < N; j++) {
+                        bruteForceChecks++;
+
+                        double dx = pts[i].x - pts[j].x;
+                        double dy = pts[i].y - pts[j].y;
+
+                        if (dx * dx + dy * dy <= r2) {
+                            edgesBf++;
+                        }
+                    }
+                }
+            });
+
+            double bfChecksPerSecond =
+                    elapsedBf > 0.0
+                    ? (double)bruteForceChecks / elapsedBf
+                    : 0.0;
+
+            double avgDegree = 2.0 * (double)edgesBf / (double)N;
+            double timeSpeedup = elapsedBf / elapsedQt;
+            double checkReduction =
+                    qtStats.distanceChecks > 0
+                    ? (double)bruteForceChecks / (double)qtStats.distanceChecks
+                    : 0.0;
+
+            bool sameEdges = edgesQt == edgesBf;
+            bool quadtreeSlower = elapsedQt > elapsedBf;
+
+            if (!foundBreakingPointForN && quadtreeSlower) {
+                foundBreakingPointForN = true;
+                globalFoundBreakingPoint = true;
+                breakingAvgDegree = avgDegree;
+                breakingRadius = radius;
+            }
+
+            // ─────────────────────────────────────────────────────────────
+            // Row 1: distance checks
+            // ─────────────────────────────────────────────────────────────
             {
                 BenchmarkRow row;
                 row.benchmark    = "quadtree";
                 row.variant      = "Quadtree";
                 row.paramN       = N;
-                row.paramP       = radius;
-                row.elapsedS     = elapsed_qt;
-                row.quality      = buildTime;
-                row.qualityLabel = "build_time_s";
-                row.notes        = "edges_found=" + std::to_string(edgesQt)
-                                   + " radius=" + std::to_string((int)radius);
+                row.paramP       = avgDegree;
+                row.elapsedS     = elapsedQt;
+                row.quality      = (double)qtStats.distanceChecks;
+                row.qualityLabel = "distance_checks";
+                row.dnf          = !sameEdges;
+                row.notes        = "radius=" + std::to_string(radius)
+                                   + " edges_found=" + std::to_string(edgesQt)
+                                   + " build_time_s=" + std::to_string(buildTime)
+                                   + " checks_per_s=" + std::to_string(qtChecksPerSecond)
+                                   + " box_checks=" + std::to_string(qtStats.boxChecks)
+                                   + " nodes_visited=" + std::to_string(qtStats.nodesVisited)
+                                   + " nodes_pruned=" + std::to_string(qtStats.nodesPruned)
+                                   + " avg_degree=" + std::to_string(avgDegree)
+                                   + " speedup=" + std::to_string(timeSpeedup)
+                                   + " check_reduction=" + std::to_string(checkReduction);
                 record(row);
             }
-
-            // ── Brute force: O(n²) pair check ────────────────────────────
-            long edgesBf = 0;
-            double elapsed_bf = timed([&]{
-                double r2 = radius * radius;
-                for (int i = 0; i < N; i++) {
-                    for (int j = i + 1; j < N; j++) {
-                        double dx = pts[i].x - pts[j].x;
-                        double dy = pts[i].y - pts[j].y;
-                        if (dx*dx + dy*dy <= r2) edgesBf++;
-                    }
-                }
-            });
 
             {
                 BenchmarkRow row;
                 row.benchmark    = "quadtree";
                 row.variant      = "BruteForce";
                 row.paramN       = N;
-                row.paramP       = radius;
-                row.elapsedS     = elapsed_bf;
-                row.quality      = 0;
-                row.qualityLabel = "build_time_s";
-                row.notes        = "edges_found=" + std::to_string(edgesBf)
-                                   + " radius=" + std::to_string((int)radius);
+                row.paramP       = avgDegree;
+                row.elapsedS     = elapsedBf;
+                row.quality      = (double)bruteForceChecks;
+                row.qualityLabel = "distance_checks";
+                row.dnf          = !sameEdges;
+                row.notes        = "radius=" + std::to_string(radius)
+                                   + " edges_found=" + std::to_string(edgesBf)
+                                   + " checks_per_s=" + std::to_string(bfChecksPerSecond)
+                                   + " avg_degree=" + std::to_string(avgDegree);
                 record(row);
             }
 
-            std::cout << "    N=" << N
-                      << "  QT=" << std::fixed << std::setprecision(4) << elapsed_qt << "s"
-                      << "  BF=" << elapsed_bf << "s"
-                      << "  edges=" << edgesBf << "\n";
+            // ─────────────────────────────────────────────────────────────
+            // Row 2: checks per second
+            // ─────────────────────────────────────────────────────────────
+            {
+                BenchmarkRow row;
+                row.benchmark    = "quadtree";
+                row.variant      = "Quadtree";
+                row.paramN       = N;
+                row.paramP       = avgDegree;
+                row.elapsedS     = elapsedQt;
+                row.quality      = qtChecksPerSecond;
+                row.qualityLabel = "checks_per_second";
+                row.dnf          = !sameEdges;
+                row.notes        = "radius=" + std::to_string(radius)
+                                   + " distance_checks=" + std::to_string(qtStats.distanceChecks)
+                                   + " avg_degree=" + std::to_string(avgDegree);
+                record(row);
+            }
+
+            {
+                BenchmarkRow row;
+                row.benchmark    = "quadtree";
+                row.variant      = "BruteForce";
+                row.paramN       = N;
+                row.paramP       = avgDegree;
+                row.elapsedS     = elapsedBf;
+                row.quality      = bfChecksPerSecond;
+                row.qualityLabel = "checks_per_second";
+                row.dnf          = !sameEdges;
+                row.notes        = "radius=" + std::to_string(radius)
+                                   + " distance_checks=" + std::to_string(bruteForceChecks)
+                                   + " avg_degree=" + std::to_string(avgDegree);
+                record(row);
+            }
+
+            std::cout << "    radius=" << std::fixed << std::setprecision(1) << radius
+                      << "  avg_degree=" << std::setprecision(2) << avgDegree
+                      << "  QT=" << std::setprecision(4) << elapsedQt << "s"
+                      << "  BF=" << elapsedBf << "s"
+                      << "  speedup=" << timeSpeedup << "x"
+                      << "  QT_checks=" << qtStats.distanceChecks
+                      << "  BF_checks=" << bruteForceChecks
+                      << "  check_reduction=" << checkReduction << "x";
+
+            if (!sameEdges) {
+                std::cout << "  [EDGE MISMATCH]";
+            }
+
+            if (quadtreeSlower) {
+                std::cout << "  [QT slower]";
+            }
+
+            std::cout << "\n";
+        }
+
+        if (foundBreakingPointForN) {
+            std::cout << "  Breaking point for N=" << N
+                      << ": radius≈" << breakingRadius
+                      << ", avg_degree≈" << breakingAvgDegree
+                      << "\n";
+        } else {
+            std::cout << "  No breaking point found for N=" << N
+                      << " in this radius sweep.\n";
         }
     }
+
+    if (!globalFoundBreakingPoint) {
+        std::cout << "\n  No quadtree degradation point found in this sweep.\n";
+    }
+
     std::cout << "  Done.\n";
 }
 
+void Benchmark::runPrim() {
+    std::cout << "\n== Prim — FibonacciHeap vs MutablePriorityQueue ==\n";
 
-void Benchmark::runCorrectnessCheck() {
-    std::cout << "\n== Correctness Check: FibHeap vs MutablePQ distances ==\n";
+    const std::vector<int> nodeCounts = {
+            1000, 2000, 5000, 10000, 20000
+    };
 
-    int totalPairs    = 0;
-    int mismatchesPQ  = 0;   // FibHeap Dijkstra vs MutablePQ Dijkstra
-    int mismatchesStar = 0;  // A* (FibHeap) vs Dijkstra (FibHeap)
-    const double EPS  = 1e-6;
+    const std::vector<int> avgDegrees = {
+            4, 8, 16, 32
+    };
 
-    for (int avgDeg : cfg.correctnessAvgDegrees) {
-        for (int V : cfg.correctnessVertexCounts) {
-            Multigraph g = buildRandomGraph(V, avgDeg,
-                                            cfg.correctnessRngSeed + V + avgDeg);
+    auto distance = [](const std::shared_ptr<Vertex>& a,
+                       const std::shared_ptr<Vertex>& b) {
+        double dx = a->getCoordinates().getX() - b->getCoordinates().getX();
+        double dy = a->getCoordinates().getY() - b->getCoordinates().getY();
+        return std::sqrt(dx * dx + dy * dy);
+    };
 
-            std::mt19937 rng(cfg.correctnessRngSeed + V + avgDeg);
-            std::uniform_int_distribution<int> vtxD(0, V - 1);
+    auto mstWeight = [](const std::vector<std::shared_ptr<Vertex>>& mst) {
+        double total = 0.0;
 
-            int localMismatchPQ   = 0;
-            int localMismatchStar = 0;
+        for (const auto& v : mst) {
+            if (v->getPath() != nullptr) {
+                total += v->getDist();
+            }
+        }
 
-            for (int p = 0; p < cfg.correctnessPairsPerGraph; p++) {
-                int si = vtxD(rng), di = vtxD(rng);
-                while (di == si) di = vtxD(rng);
+        return total;
+    };
 
-                auto src  = g.getVertex(si);
-                auto dest = g.getVertex(di);
+    for (int avgDegree : avgDegrees) {
+        std::cout << "  avg_degree=" << avgDegree << "\n";
 
-                // Dijkstra with FibHeap
-                g.dijkstra_aux(src, dest, FIBONACCI_HEAP);
-                double distFib = dest->getDist();
+        for (int N : nodeCounts) {
+            Multigraph g;
 
-                // Dijkstra with MutablePQ
-                g.dijkstra_aux(src, dest, MUTABLE_PRIORITY_QUEUE);
-                double distMut = dest->getDist();
+            std::mt19937 rng(cfg.pqRngSeed + N + avgDegree);
+            std::uniform_real_distribution<double>
+                    rx(cfg.coordMinX, cfg.coordMaxX),
+                    ry(cfg.coordMinY, cfg.coordMaxY);
 
-                // A* with FibHeap
-                g.astar_aux(src, dest, FIBONACCI_HEAP);
-                double distAStar = dest->getDist();
+            std::vector<u_int> ids;
+            ids.reserve(N);
 
-                totalPairs++;
+            for (int i = 0; i < N; i++) {
+                double x = rx(rng);
+                double y = ry(rng);
 
-                bool bothInf = (distFib >= DBL_MAX / 2) && (distMut >= DBL_MAX / 2);
-                if (!bothInf && std::abs(distFib - distMut) > EPS) {
-                    localMismatchPQ++;
-                    mismatchesPQ++;
-                    std::cout << "  [MISMATCH PQ] V=" << V << " deg=" << avgDeg
-                              << " src=" << si << " dst=" << di
-                              << "  FibHeap=" << distFib
-                              << "  MutablePQ=" << distMut << "\n";
-                }
-
-                bool astarBothInf = (distFib >= DBL_MAX / 2) && (distAStar >= DBL_MAX / 2);
-                if (!astarBothInf && std::abs(distFib - distAStar) > EPS) {
-                    localMismatchStar++;
-                    mismatchesStar++;
-                    std::cout << "  [MISMATCH A*] V=" << V << " deg=" << avgDeg
-                              << " src=" << si << " dst=" << di
-                              << "  Dijkstra=" << distFib
-                              << "  A*=" << distAStar << "\n";
-                }
+                ids.push_back(g.addVertex(
+                        x,
+                        y,
+                        "v_" + std::to_string(i)
+                ));
             }
 
-            std::string statusPQ   = localMismatchPQ   == 0 ? "OK" : "FAIL";
-            std::string statusStar = localMismatchStar == 0 ? "OK" : "FAIL";
-            std::cout << "  V=" << V << " deg=" << avgDeg
-                      << "  pairs=" << cfg.correctnessPairsPerGraph
-                      << "  Dijkstra(Fib vs Mut)=" << statusPQ
-                      << "  A*(Fib) vs Dijkstra(Fib)=" << statusStar << "\n";
+            const auto& verts = g.getVertexSet();
+
+            // ----------------------------------------------------------------
+            // Build a connected sparse graph.
+            //
+            // First add a chain to guarantee connectivity.
+            // Then add random extra edges until approximate avg degree is reached.
+            //
+            // Undirected edge count target:
+            //   E ~= N * avgDegree / 2
+            // Chain already adds N - 1 edges.
+            // ----------------------------------------------------------------
+            std::set<std::pair<u_int, u_int>> usedEdges;
+
+            auto addUndirectedEdge = [&](u_int a, u_int b) {
+                if (a == b) return false;
+
+                u_int x = std::min(a, b);
+                u_int y = std::max(a, b);
+
+                if (usedEdges.count({x, y})) {
+                    return false;
+                }
+
+                usedEdges.insert({x, y});
+
+                double w = distance(verts[a], verts[b]);
+
+                g.addEdge(a, b, w, WALK);
+                g.addEdge(b, a, w, WALK);
+
+                return true;
+            };
+
+            for (int i = 0; i + 1 < N; i++) {
+                addUndirectedEdge(i, i + 1);
+            }
+
+            long long targetUndirectedEdges =
+                    std::max<long long>(N - 1, ((long long)N * avgDegree) / 2);
+
+            std::uniform_int_distribution<int> vertexDist(0, N - 1);
+
+            while ((long long)usedEdges.size() < targetUndirectedEdges) {
+                u_int a = vertexDist(rng);
+                u_int b = vertexDist(rng);
+                addUndirectedEdge(a, b);
+            }
+
+            auto src = g.getVertex(0);
+
+            // ----------------------------------------------------------------
+            // Prim with Fibonacci Heap
+            // ----------------------------------------------------------------
+            double fibWeight = 0.0;
+            bool fibDnf = false;
+
+            double elapsedFib = timed([&] {
+                auto mst = g.prim(src, FIBONACCI_HEAP);
+                fibWeight = mstWeight(mst);
+
+                if ((int)mst.size() != N) {
+                    fibDnf = true;
+                }
+            });
+
+            {
+                BenchmarkRow row;
+                row.benchmark    = "prim";
+                row.variant      = "Prim_FibHeap";
+                row.paramN       = N;
+                row.paramP       = avgDegree;
+                row.elapsedS     = elapsedFib;
+                row.quality      = fibWeight;
+                row.qualityLabel = "mst_weight";
+                row.dnf          = fibDnf;
+                row.notes        = "undirected_edges=" + std::to_string(usedEdges.size()) +
+                                   " avg_degree=" + std::to_string(avgDegree);
+                record(row);
+            }
+
+            // ----------------------------------------------------------------
+            // Prim with MutablePriorityQueue
+            // ----------------------------------------------------------------
+            double mutableWeight = 0.0;
+            bool mutableDnf = false;
+
+            double elapsedMutable = timed([&] {
+                auto mst = g.prim(src, MUTABLE_PRIORITY_QUEUE);
+                mutableWeight = mstWeight(mst);
+
+                if ((int)mst.size() != N) {
+                    mutableDnf = true;
+                }
+            });
+
+            {
+                BenchmarkRow row;
+                row.benchmark    = "prim";
+                row.variant      = "Prim_MutablePQ";
+                row.paramN       = N;
+                row.paramP       = avgDegree;
+                row.elapsedS     = elapsedMutable;
+                row.quality      = mutableWeight;
+                row.qualityLabel = "mst_weight";
+                row.dnf          = mutableDnf;
+                row.notes        = "undirected_edges=" + std::to_string(usedEdges.size()) +
+                                   " avg_degree=" + std::to_string(avgDegree);
+                record(row);
+            }
+
+            double speedup = elapsedMutable / elapsedFib;
+
+            std::cout << "    N=" << N
+                      << "  edges=" << usedEdges.size()
+                      << "  Fib=" << std::fixed << std::setprecision(5) << elapsedFib << "s"
+                      << "  Mutable=" << elapsedMutable << "s"
+                      << "  Mutable/Fib=" << speedup << "x"
+                      << "  MST weights: fib=" << fibWeight
+                      << " mutable=" << mutableWeight;
+
+            if (std::abs(fibWeight - mutableWeight) > 1e-6) {
+                std::cout << "  [MST WEIGHT MISMATCH]";
+            }
+
+            std::cout << "\n";
         }
     }
 
-    std::cout << "\n  --- Correctness summary ---\n"
-              << "  Total pairs checked : " << totalPairs << "\n"
-              << "  Dijkstra PQ mismatches : " << mismatchesPQ
-              << (mismatchesPQ == 0 ? "  [ALL OK]" : "  [FAILURES DETECTED]") << "\n"
-              << "  A* vs Dijkstra mismatches : " << mismatchesStar
-              << (mismatchesStar == 0 ? "  [ALL OK]" : "  [FAILURES DETECTED]") << "\n";
+    std::cout << "  Done.\n";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -747,11 +1016,13 @@ void Benchmark::runAll() {
     std::cout << "\n=== EDAA Benchmark Suite ===\n"
               << "  Output: " << cfg.outputDir << "\n\n";
 
+    //runQuadtreeCorrectnessCheck();
     //runCorrectnessCheck();
-    runDijkstraVsAstar();
+    //runDijkstraVsAstar();
     //runPriorityQueues();
     //runColoring();
     //runQuadtree();
+    runPrim();
 
     writeAllCSVs();
     std::cout << "\nTotal rows: " << rows.size() << "  Done.\n\n";

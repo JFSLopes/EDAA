@@ -57,16 +57,17 @@ struct BenchmarkConfig {
     // ── Hard coloring instances — forces BF to explore large search spaces ────
     // We generate one Petersen-like graph (triangle-free, chromatic number = 3)
     // and one dense near-complete graph per size to stress BF.
-    std::vector<int> hardColoringAntennaCounts = { 10, 15, 20 };
+    //std::vector<int> hardColoringAntennaCounts = { 10, 15, 20 };
+    std::vector<int> hardColoringAntennaCounts = { 10 };
 
     // ── Quadtree vs BruteForce — interference graph construction ─────────────
     // Benchmark: for each node set, build a full interference graph using
     // (a) Quadtree range queries  (b) O(n²) brute-force scan.
     // This is the actual use-case in the coloring solver.
     std::vector<int>    quadtreeNodeCounts = {
-            500, 1000, 2000, 5000, 10000, 20000, 50000, 100000
+            100000, 200000
     };
-    std::vector<double> quadtreeRadii = { 500.0, 1000.0, 2000.0 };
+    std::vector<double> quadtreeRadii = { 200.0 };
     int quadtreeRngSeed = 99;
 
     std::vector<int> correctnessVertexCounts = { 100, 500, 1000, 5000, 10000 };
@@ -111,18 +112,17 @@ public:
     void runPriorityQueues();
     void runColoring();
     void runQuadtree();
-    void runCorrectnessCheck();
-
-private:
-    BenchmarkConfig cfg;
-    std::vector<BenchmarkRow> rows;
-
-    Multigraph buildRandomGraph(int V, int avgDeg, int seed) const;
+    void runPrim();
 
     /// Times fn(); returns elapsed seconds.
     double timed(const std::function<void()>& fn) const;
-
+    BenchmarkConfig cfg;
     void record(BenchmarkRow row);
+
+private:
+    std::vector<BenchmarkRow> rows;
+
+    Multigraph buildRandomGraph(int V, int avgDeg, int seed) const;
     void writeCSV(const std::string& filename,
                   const std::vector<BenchmarkRow>& subset) const;
     void writeAllCSVs() const;

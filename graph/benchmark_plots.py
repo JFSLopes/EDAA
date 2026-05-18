@@ -42,6 +42,7 @@ dij  = load("dijkstra_astar.csv")
 pq   = load("priority_queues.csv")
 col  = load("coloring.csv")
 quad = load("quadtree.csv")
+prim = load("prim.csv")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Plot 1 — Dijkstra vs A*
@@ -273,87 +274,360 @@ if not col.empty:
         savefig(fig, "plot_coloring_hard.png")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Plot 4 — Quadtree vs BruteForce: interference graph construction
-#   param_secondary = interference radius
-#   elapsed_s = total time to build full edge list for all N nodes
+# Plot 4 — Quadtree vs BruteForce: connectivity sweep
+#   param_secondary = average degree / connectivity
+#   elapsed_s = total graph construction time
+#   quality = metric selected by quality_label
 # ══════════════════════════════════════════════════════════════════════════════
 if not quad.empty:
-    radii = sorted(quad["param_secondary"].unique())
 
-    fig, axes = plt.subplots(1, len(radii), figsize=(6 * len(radii), 5),
+    # ── Use only the main distance-check rows for time plots ────────────────
+    quad_checks = quad[quad["quality_label"] == "distance_checks"].copy()
+    quad_cps    = quad[quad["quality_label"] == "checks_per_second"].copy()
+
+    if not quad_checks.empty:
+        node_counts = sorted(quad_checks["n"].unique())
+
+        # ── 4a: Time vs average degree ─────────────────────────────────────
+        fig, axes = plt.subplots(1, len(node_counts),
+                                 figsize=(6 * len(node_counts), 5),
+                                 facecolor=BG, sharey=False)
+
+        if len(node_counts) == 1:
+            axes = [axes]
+
+        for ai, N in enumerate(node_counts):
+            sub = quad_checks[quad_checks["n"] == N]
+
+            qt = sub[sub["variant"] == "Quadtree"].sort_values("param_secondary")
+            bf = sub[sub["variant"] == "BruteForce"].sort_values("param_secondary")
+
+            ax = axes[ai]
+
+            ax.plot(qt["param_secondary"], qt["elapsed_s"],
+                    marker="o", color=PALETTE[0],
+                    label="Quadtree", linewidth=1.8, markersize=4)
+
+            ax.plot(bf["param_secondary"], bf["elapsed_s"],
+                    marker="s", color=PALETTE[1],
+                    label="BruteForce", linewidth=1.8, markersize=4)
+
+            style(ax)
+            ax.set_title(f"Total time — N={N}", fontsize=10)
+            ax.set_xlabel("Average degree / connectivity")
+            ax.set_ylabel("Elapsed time (s)")
+            ax.set_yscale("log")
+            ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
+
+        fig.suptitle("Quadtree vs BruteForce — Time vs Connectivity",
+                     color="white", fontsize=13)
+        fig.tight_layout()
+        savefig(fig, "plot_quadtree_time_vs_connectivity.png")
+
+        # ── 4b: Distance checks vs average degree ──────────────────────────
+        fig, axes = plt.subplots(1, len(node_counts),
+                                 figsize=(6 * len(node_counts), 5),
+                                 facecolor=BG, sharey=False)
+
+        if len(node_counts) == 1:
+            axes = [axes]
+
+        for ai, N in enumerate(node_counts):
+            sub = quad_checks[quad_checks["n"] == N]
+
+            qt = sub[sub["variant"] == "Quadtree"].sort_values("param_secondary")
+            bf = sub[sub["variant"] == "BruteForce"].sort_values("param_secondary")
+
+            ax = axes[ai]
+
+            ax.plot(qt["param_secondary"], qt["quality"],
+                    marker="o", color=PALETTE[0],
+                    label="Quadtree checks", linewidth=1.8, markersize=4)
+
+            ax.plot(bf["param_secondary"], bf["quality"],
+                    marker="s", color=PALETTE[1],
+                    label="BruteForce checks", linewidth=1.8, markersize=4)
+
+            style(ax)
+            ax.set_title(f"Distance checks — N={N}", fontsize=10)
+            ax.set_xlabel("Average degree / connectivity")
+            ax.set_ylabel("Distance checks")
+            ax.set_yscale("log")
+            ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
+
+        fig.suptitle("Quadtree vs BruteForce — Checks vs Connectivity",
+                     color="white", fontsize=13)
+        fig.tight_layout()
+        savefig(fig, "plot_quadtree_checks_vs_connectivity.png")
+
+        # ── 4c: Runtime speedup vs average degree ──────────────────────────
+        fig, axes = plt.subplots(1, len(node_counts),
+                                 figsize=(6 * len(node_counts), 5),
+                                 facecolor=BG, sharey=False)
+
+        if len(node_counts) == 1:
+            axes = [axes]
+
+        for ai, N in enumerate(node_counts):
+            sub = quad_checks[quad_checks["n"] == N]
+
+            qt = sub[sub["variant"] == "Quadtree"].set_index("param_secondary").sort_index()
+            bf = sub[sub["variant"] == "BruteForce"].set_index("param_secondary").sort_index()
+
+            common = qt.index.intersection(bf.index)
+
+            ax = axes[ai]
+
+            if len(common) > 0:
+                speedup = bf.loc[common, "elapsed_s"] / qt.loc[common, "elapsed_s"]
+
+                ax.plot(common, speedup,
+                        marker="D", color=PALETTE[2],
+                        label="BF time / QT time",
+                        linewidth=1.8, markersize=5)
+
+                ax.axhline(1.0, color="white", linewidth=0.6,
+                           linestyle="--", alpha=0.5)
+
+                slower = speedup[speedup < 1.0]
+                if not slower.empty:
+                    first_x = slower.index[0]
+                    first_y = slower.iloc[0]
+                    ax.scatter([first_x], [first_y],
+                               marker="X", s=90, color=PALETTE[1],
+                               zorder=5, label="Breaking point")
+                    ax.annotate(f"break ≈ {first_x:.1f}",
+                                (first_x, first_y),
+                                textcoords="offset points",
+                                xytext=(6, 6),
+                                color="#9CA3AF",
+                                fontsize=8)
+
+            style(ax)
+            ax.set_title(f"Runtime speedup — N={N}", fontsize=10)
+            ax.set_xlabel("Average degree / connectivity")
+            ax.set_ylabel("Speedup ×")
+            ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
+
+        fig.suptitle("Quadtree Runtime Speedup vs Connectivity",
+                     color="white", fontsize=13)
+        fig.tight_layout()
+        savefig(fig, "plot_quadtree_speedup_vs_connectivity.png")
+
+        # ── 4d: Check reduction vs average degree ──────────────────────────
+        fig, axes = plt.subplots(1, len(node_counts),
+                                 figsize=(6 * len(node_counts), 5),
+                                 facecolor=BG, sharey=False)
+
+        if len(node_counts) == 1:
+            axes = [axes]
+
+        for ai, N in enumerate(node_counts):
+            sub = quad_checks[quad_checks["n"] == N]
+
+            qt = sub[sub["variant"] == "Quadtree"].set_index("param_secondary").sort_index()
+            bf = sub[sub["variant"] == "BruteForce"].set_index("param_secondary").sort_index()
+
+            common = qt.index.intersection(bf.index)
+
+            ax = axes[ai]
+
+            if len(common) > 0:
+                reduction = bf.loc[common, "quality"] / qt.loc[common, "quality"]
+
+                ax.plot(common, reduction,
+                        marker="D", color=PALETTE[3],
+                        label="BF checks / QT checks",
+                        linewidth=1.8, markersize=5)
+
+                ax.axhline(1.0, color="white", linewidth=0.6,
+                           linestyle="--", alpha=0.5)
+
+            style(ax)
+            ax.set_title(f"Check reduction — N={N}", fontsize=10)
+            ax.set_xlabel("Average degree / connectivity")
+            ax.set_ylabel("Reduction factor ×")
+            ax.set_yscale("log")
+            ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
+
+        fig.suptitle("Quadtree Check Reduction vs Connectivity",
+                     color="white", fontsize=13)
+        fig.tight_layout()
+        savefig(fig, "plot_quadtree_check_reduction_vs_connectivity.png")
+
+    # ── 4e: Checks per second vs average degree ─────────────────────────────
+    if not quad_cps.empty:
+        node_counts = sorted(quad_cps["n"].unique())
+
+        fig, axes = plt.subplots(1, len(node_counts),
+                                 figsize=(6 * len(node_counts), 5),
+                                 facecolor=BG, sharey=False)
+
+        if len(node_counts) == 1:
+            axes = [axes]
+
+        for ai, N in enumerate(node_counts):
+            sub = quad_cps[quad_cps["n"] == N]
+
+            qt = sub[sub["variant"] == "Quadtree"].sort_values("param_secondary")
+            bf = sub[sub["variant"] == "BruteForce"].sort_values("param_secondary")
+
+            ax = axes[ai]
+
+            ax.plot(qt["param_secondary"], qt["quality"],
+                    marker="o", color=PALETTE[0],
+                    label="Quadtree checks/s", linewidth=1.8, markersize=4)
+
+            ax.plot(bf["param_secondary"], bf["quality"],
+                    marker="s", color=PALETTE[1],
+                    label="BruteForce checks/s", linewidth=1.8, markersize=4)
+
+            style(ax)
+            ax.set_title(f"Checks per second — N={N}", fontsize=10)
+            ax.set_xlabel("Average degree / connectivity")
+            ax.set_ylabel("Checks per second")
+            ax.set_yscale("log")
+            ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
+
+        fig.suptitle("Quadtree vs BruteForce — Checks per Second",
+                     color="white", fontsize=13)
+        fig.tight_layout()
+        savefig(fig, "plot_quadtree_checks_per_second.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Plot — Prim: FibonacciHeap vs MutablePriorityQueue
+#   param_secondary = avg_degree
+#   elapsed_s = time to compute MST
+#   quality = MST total weight
+# ══════════════════════════════════════════════════════════════════════════════
+if not prim.empty:
+    degrees = sorted(prim["param_secondary"].unique())
+
+    # ── Prim time vs graph size ─────────────────────────────────────────────
+    fig, axes = plt.subplots(1, len(degrees), figsize=(5 * len(degrees), 5),
                              facecolor=BG, sharey=False)
-    if len(radii) == 1:
+
+    if len(degrees) == 1:
         axes = [axes]
 
-    for ax, radius in zip(axes, radii):
-        sub = quad[quad["param_secondary"] == radius]
-        qt_data = sub[sub["variant"] == "Quadtree"].sort_values("n")
-        bf_data = sub[sub["variant"] == "BruteForce"].sort_values("n")
+    for ax, deg in zip(axes, degrees):
+        sub = prim[(prim["param_secondary"] == deg) & (prim["dnf"] == 0)]
 
-        ax.plot(qt_data["n"], qt_data["elapsed_s"], marker="o", color=PALETTE[0],
-                label="Quadtree (build+query)", linewidth=1.8, markersize=4)
-        ax.plot(bf_data["n"], bf_data["elapsed_s"], marker="s", color=PALETTE[1],
-                label="BruteForce O(n²)", linewidth=1.8, markersize=4)
+        for i, (name, grp) in enumerate(sub.groupby("variant")):
+            grp = grp.sort_values("n")
 
-        # Annotate build time separately on a twin axis
-        if not qt_data.empty and "quality" in qt_data.columns:
-            ax2 = ax.twinx()
-            ax2.plot(qt_data["n"], qt_data["quality"], marker="x", color=PALETTE[3],
-                     linestyle="--", linewidth=1, markersize=4, label="QT build time")
-            ax2.set_ylabel("QT build time (s)", color="#9CA3AF", fontsize=8)
-            ax2.tick_params(colors="#9CA3AF", labelsize=7)
-            ax2.legend(facecolor=PANEL, labelcolor="white", fontsize=7, loc="upper left")
+            ax.plot(grp["n"], grp["elapsed_s"],
+                    marker="o",
+                    color=PALETTE[i],
+                    label=name,
+                    linewidth=1.8,
+                    markersize=4)
 
         style(ax)
-        ax.set_title(f"radius={int(radius)}m")
-        ax.set_xlabel("Nodes (n)")
-        ax.set_ylabel("Total time to build interference graph (s)")
+        ax.set_title(f"avg_degree={int(deg)}", fontsize=10)
+        ax.set_xlabel("Vertices (n)")
+        ax.set_ylabel("Elapsed time (s)")
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
 
-    fig.suptitle("Quadtree vs BruteForce — Interference Graph Construction",
+    fig.suptitle("Prim — FibonacciHeap vs MutablePriorityQueue",
                  color="white", fontsize=13)
-    savefig(fig, "plot_quadtree.png")
 
-    # Speedup subplot
-    fig, axes = plt.subplots(1, len(radii), figsize=(6 * len(radii), 4),
-                             facecolor=BG, sharey=True)
-    if len(radii) == 1:
+    fig.tight_layout()
+    savefig(fig, "plot_prim_time.png")
+
+    # ── Prim speedup ────────────────────────────────────────────────────────
+    fig, axes = plt.subplots(1, len(degrees), figsize=(5 * len(degrees), 5),
+                             facecolor=BG, sharey=False)
+
+    if len(degrees) == 1:
         axes = [axes]
 
-    for ax, radius in zip(axes, radii):
-        sub = quad[quad["param_secondary"] == radius]
-        qt_d = sub[sub["variant"] == "Quadtree"].set_index("n")["elapsed_s"]
-        bf_d = sub[sub["variant"] == "BruteForce"].set_index("n")["elapsed_s"]
-        common = qt_d.index.intersection(bf_d.index)
+    for ax, deg in zip(axes, degrees):
+        sub = prim[(prim["param_secondary"] == deg) & (prim["dnf"] == 0)]
+
+        fib = sub[sub["variant"] == "Prim_FibHeap"].set_index("n").sort_index()
+        mut = sub[sub["variant"] == "Prim_MutablePQ"].set_index("n").sort_index()
+
+        common = fib.index.intersection(mut.index)
+
         if len(common) > 0:
-            speedup = bf_d[common] / qt_d[common]
-            ax.plot(common, speedup, marker="D", color=PALETTE[2],
-                    linewidth=1.8, markersize=5, label="Quadtree speedup")
-            ax.axhline(1.0, color="white", linewidth=0.6, linestyle="--",
-                       alpha=0.4, label="No speedup")
+            # > 1 means FibonacciHeap is faster than MutablePQ.
+            speedup = mut.loc[common, "elapsed_s"] / fib.loc[common, "elapsed_s"]
+
+            ax.plot(common, speedup,
+                    marker="D",
+                    color=PALETTE[2],
+                    label="MutablePQ time / FibHeap time",
+                    linewidth=1.8,
+                    markersize=5)
+
+            ax.axhline(1.0,
+                       color="white",
+                       linewidth=0.6,
+                       linestyle="--",
+                       alpha=0.5)
+
         style(ax)
-        ax.set_title(f"Speedup — radius={int(radius)}m")
-        ax.set_xlabel("Nodes (n)")
-        ax.set_ylabel("Speedup (×)")
+        ax.set_title(f"Speedup — avg_degree={int(deg)}", fontsize=10)
+        ax.set_xlabel("Vertices (n)")
+        ax.set_ylabel("Speedup ×")
         ax.set_xscale("log")
         ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
 
-    fig.suptitle("Quadtree Speedup over BruteForce (interference graph)",
+    fig.suptitle("Prim — FibonacciHeap Speedup over MutablePriorityQueue",
                  color="white", fontsize=13)
-    savefig(fig, "plot_quadtree_speedup.png")
+
+    fig.tight_layout()
+    savefig(fig, "plot_prim_speedup.png")
+
+    # ── MST weight correctness comparison ──────────────────────────────────
+    fig, axes = plt.subplots(1, len(degrees), figsize=(5 * len(degrees), 5),
+                             facecolor=BG, sharey=False)
+
+    if len(degrees) == 1:
+        axes = [axes]
+
+    for ax, deg in zip(axes, degrees):
+        sub = prim[(prim["param_secondary"] == deg) & (prim["dnf"] == 0)]
+
+        for i, (name, grp) in enumerate(sub.groupby("variant")):
+            grp = grp.sort_values("n")
+
+            ax.plot(grp["n"], grp["quality"],
+                    marker="s",
+                    color=PALETTE[i],
+                    label=name,
+                    linewidth=1.8,
+                    markersize=4)
+
+        style(ax)
+        ax.set_title(f"MST weight — avg_degree={int(deg)}", fontsize=10)
+        ax.set_xlabel("Vertices (n)")
+        ax.set_ylabel("MST total weight")
+        ax.set_xscale("log")
+        ax.legend(facecolor=PANEL, labelcolor="white", fontsize=8)
+
+    fig.suptitle("Prim — MST Weight Consistency",
+                 color="white", fontsize=13)
+
+    fig.tight_layout()
+    savefig(fig, "plot_prim_mst_weight.png")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Summary page
 # ══════════════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(2, 2, figsize=(16, 10), facecolor=BG)
+fig, axes = plt.subplots(2, 3, figsize=(22, 10), facecolor=BG)
 axes = axes.flatten()
 panels = [
     ("Dijkstra vs A* (FibHeap, deg=10)",
      dij[(dij["param_secondary"] == 10) & (dij["dnf"] == 0)] if not dij.empty else pd.DataFrame()),
     ("PQ Comparison (deg=10)",
      pq[(pq["param_secondary"] == 10) & (pq["dnf"] == 0)] if not pq.empty else pd.DataFrame()),
+    ("Prim MST (deg=8)",
+     prim[(prim["param_secondary"] == 8) & (prim["dnf"] == 0)] if not prim.empty else pd.DataFrame()),
     ("Coloring (radius=1000m)",
      col[(col["param_secondary"] == 1000.0) &
          ~col["variant"].str.contains("Hard")] if not col.empty else pd.DataFrame()),

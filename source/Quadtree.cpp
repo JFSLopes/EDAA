@@ -13,11 +13,12 @@ bool AABB::contains(double x, double y) const {
 }
 
 bool AABB::intersectsCircle(double x, double y, double r) const {
-    /// Closest point on the box to the query point
     double closestX = std::clamp(x, cx - hw, cx + hw);
     double closestY = std::clamp(y, cy - hh, cy + hh);
+
     double dx = x - closestX;
     double dy = y - closestY;
+
     return dx * dx + dy * dy <= r * r;
 }
 
@@ -67,60 +68,38 @@ bool Quadtree::Node::insert(Vertex* v) {
            || sw->insert(v) || se->insert(v);
 }
 
-void Quadtree::Node::nearest(double x, double y,
-                             Vertex*& best, double& bestDist) const {
-    /// Prune: if this box can't contain anything closer than bestDist, skip
-    if (!boundary.intersectsCircle(x, y, std::sqrt(bestDist))) return;
+void Quadtree::Node::rangeSearch(double x, double y, double r, std::vector<Vertex*>& out, QuadtreeStats* stats) const {
+    if (stats) {
+        stats->nodesVisited++;
+        stats->boxChecks++;
+    }
+
+    if (!boundary.intersectsCircle(x, y, r)) {
+        if (stats) stats->nodesPruned++;
+        return;
+    }
 
     if (!divided) {
+        double r2 = r * r;
+
         for (Vertex* v : points) {
+            if (stats) stats->distanceChecks++;
+
             double dx = v->getCoordinates().getX() - x;
             double dy = v->getCoordinates().getY() - y;
-            double d2 = dx * dx + dy * dy;
-            if (d2 < bestDist) {
-                bestDist = d2;
-                best     = v;
+
+            if (dx * dx + dy * dy <= r2) {
+                out.push_back(v);
             }
         }
+
         return;
     }
 
-    /// Visit children in order of proximity to query point
-    /// so pruning kicks in as early as possible
-    std::array<Node*, 4> children = { nw.get(), ne.get(), sw.get(), se.get() };
-    std::sort(children.begin(), children.end(), [&](Node* a, Node* b) {
-        auto dist2 = [&](Node* n) {
-            double dx = std::clamp(x, n->boundary.cx - n->boundary.hw,
-                                   n->boundary.cx + n->boundary.hw) - x;
-            double dy = std::clamp(y, n->boundary.cy - n->boundary.hh,
-                                   n->boundary.cy + n->boundary.hh) - y;
-            return dx * dx + dy * dy;
-        };
-        return dist2(a) < dist2(b);
-    });
-
-    for (Node* child : children)
-        child->nearest(x, y, best, bestDist);
-}
-
-void Quadtree::Node::rangeSearch(double x, double y, double r,
-                                 std::vector<Vertex*>& out) const {
-    if (!boundary.intersectsCircle(x, y, r)) return;
-
-    if (!divided) {
-        for (Vertex* v : points) {
-            double dx = v->getCoordinates().getX() - x;
-            double dy = v->getCoordinates().getY() - y;
-            if (dx * dx + dy * dy <= r * r)
-                out.push_back(v);
-        }
-        return;
-    }
-
-    nw->rangeSearch(x, y, r, out);
-    ne->rangeSearch(x, y, r, out);
-    sw->rangeSearch(x, y, r, out);
-    se->rangeSearch(x, y, r, out);
+    nw->rangeSearch(x, y, r, out, stats);
+    ne->rangeSearch(x, y, r, out, stats);
+    sw->rangeSearch(x, y, r, out, stats);
+    se->rangeSearch(x, y, r, out, stats);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,15 +133,14 @@ Quadtree::Quadtree(const std::vector<std::shared_ptr<Vertex>>& vertices) {
         root->insert(v.get());
 }
 
-Vertex* Quadtree::nearest(double x, double y) const {
-    Vertex* best    = nullptr;
-    double  bestDist = std::numeric_limits<double>::max();
-    root->nearest(x, y, best, bestDist);
-    return best;
-}
-
 std::vector<Vertex*> Quadtree::rangeSearch(double x, double y, double r) const {
     std::vector<Vertex*> out;
-    root->rangeSearch(x, y, r, out);
+    root->rangeSearch(x, y, r, out, nullptr);
+    return out;
+}
+
+std::vector<Vertex*> Quadtree::rangeSearch(double x, double y, double r, QuadtreeStats& stats) const {
+    std::vector<Vertex*> out;
+    root->rangeSearch(x, y, r, out, &stats);
     return out;
 }

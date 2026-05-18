@@ -1,4 +1,5 @@
 #include "header/Benchmark.h"
+#include "header/BenchmarkHardware.h"
 
 int main() {
     //App app;
@@ -7,6 +8,9 @@ int main() {
 
     Benchmark bench(cfg);
     //bench.runDijkstraVsAstar();
-    bench.runAll();
+    //bench.runAll();
+
+    BenchmarkHardware benchmarkHardware(bench);
+    benchmarkHardware.runAll();
     return 0;
 }

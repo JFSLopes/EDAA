@@ -6,6 +6,13 @@
 #include <memory>
 #include <limits>
 
+struct QuadtreeStats {
+    long long boxChecks = 0;        // How many node bounding boxes were tested
+    long long nodesVisited = 0;     // How many quadtree nodes were visited
+    long long nodesPruned = 0;      // How many nodes were skipped
+    long long distanceChecks = 0;   // How many point distance checks were done
+};
+
 /**
  * Axis-aligned bounding box used by the Quadtree.
  */
@@ -39,11 +46,7 @@ class Quadtree {
 
         void subdivide();
         bool insert(Vertex* v);
-
-        void nearest(double x, double y,
-                     Vertex*& best, double& bestDist) const;
-        void rangeSearch(double x, double y, double r,
-                         std::vector<Vertex*>& out) const;
+        void rangeSearch(double x, double y, double r, std::vector<Vertex*>& out, QuadtreeStats* stats = nullptr) const;
     };
 
     std::unique_ptr<Node> root;
@@ -56,14 +59,10 @@ public:
     explicit Quadtree(const std::vector<std::shared_ptr<Vertex>>& vertices);
 
     /**
-     * Find the nearest vertex to (x, y). O(log n) average.
-     */
-    [[nodiscard]] Vertex* nearest(double x, double y) const;
-
-    /**
      * Find all vertices within radius r of (x, y).
      */
     [[nodiscard]] std::vector<Vertex*> rangeSearch(double x, double y, double r) const;
+    [[nodiscard]] std::vector<Vertex*> rangeSearch(double x, double y, double r, QuadtreeStats& stats) const;
 };
 
 #endif //EDAA_QUADTREE_H

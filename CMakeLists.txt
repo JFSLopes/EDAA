@@ -17,4 +17,5 @@ add_executable(EDAA main.cpp
         source/Quadtree.cpp
         source/Coloring.cpp
         source/Benchmark.cpp
+        source/BenchmarkHardware.cpp
 )
