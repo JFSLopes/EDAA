@@ -13,6 +13,8 @@ bool MutablePriorityQueue::empty() {
 }
 
 Vertex* MutablePriorityQueue::extractMin() {
+    countDelete();
+
     auto x = H[1];
     H[1] = H.back();
     H.pop_back();
@@ -22,11 +24,15 @@ Vertex* MutablePriorityQueue::extractMin() {
 }
 
 void MutablePriorityQueue::insert(Vertex* x) {
+    countInsert();
+
     H.push_back(x);
     heapifyUp(H.size() - 1);
 }
 
 void MutablePriorityQueue::decreaseKey(Vertex* x) {
+    countUpdateKey();
+
     heapifyUp(x->queueIndex);
 }
 

@@ -2,11 +2,14 @@
 #include "../header/Vertex.h"
 
 void BruteForceQueue::insert(Vertex* x) {
+    countInsert();
+
     H.push_back(x);
 }
 
 Vertex* BruteForceQueue::extractMin() {
     if (H.empty()) return nullptr;
+    countDelete();
 
     auto minIt = H.begin();
     for (auto it = H.begin() + 1; it != H.end(); ++it) {
@@ -20,6 +23,7 @@ Vertex* BruteForceQueue::extractMin() {
 }
 
 void BruteForceQueue::decreaseKey(Vertex* x) {
+    countUpdateKey();
     // The vertex is already in H with its dist updated by the caller.
     // No structural changes needed — extractMin always scans anyway.
 }

@@ -7,6 +7,7 @@
 #include <random>
 #include <set>
 
+
 #if HARDWARE_COUNTERS_AVAILABLE
 #include <linux/perf_event.h>
     #include <sys/ioctl.h>
@@ -596,6 +597,6 @@ void BenchmarkHardware::runDijkstraCache() {
 }
 
 void BenchmarkHardware::runAll() {
-    runPrimCache();
-    runDijkstraCache();
+    //runPrimCache();
+    //runDijkstraCache();
 }

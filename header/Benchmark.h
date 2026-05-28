@@ -4,135 +4,136 @@
 #include "Multigraph.h"
 #include "Coloring.h"
 #include "Quadtree.h"
+#include "PriorityQueue.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <random>
+#include <set>
 #include <string>
 #include <vector>
-#include <chrono>
-#include <functional>
-#include <optional>
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuration
-// ─────────────────────────────────────────────────────────────────────────────
-
-struct BenchmarkConfig {
-
-    // ── Output ────────────────────────────────────────────────────────────────
-    std::string outputDir = "../benchmark";
-
-    // ── Global time budget ────────────────────────────────────────────────────
-    double maxSecondsPerRun = 60.0;   ///< Hard wall-clock limit per single run
-
-    // ── Dijkstra / A*  ────────────────────────────────────────────────────────
-    // Graph sizes: 100 000 to 1 000 000 in steps of 100 000
-    //std::vector<int> dijkstraVertexCounts = {
-    //        100000, 200000, 300000, 400000, 500000,
-    //        600000, 700000, 800000, 900000, 1000000
-    //};
-    std::vector<int> dijkstraVertexCounts = {
-            100000, 200000, 300000, 400000
-    };
-    // Average degree values: 10, 20, 30, 40, 50
-    //std::vector<int> dijkstraAvgDegrees = { 10, 20, 30, 40, 50 };
-    std::vector<int> dijkstraAvgDegrees = { 20 };
-    int dijkstraSrcDstPairs = 3;   ///< Random (src, dst) pairs per run — results are averaged
-    int dijkstraRngSeed     = 42;
-
-    // ── Priority Queue comparison — BruteForce vs FibHeap ────────────────────
-    // Graph sizes: 10 000 to 50 000 in steps of 10 000
-    std::vector<int> pqVertexCounts  = { 10000, 20000, 30000, 40000, 50000 };
-    // Average degree values: 10, 20, 30
-    std::vector<int> pqAvgDegrees    = { 10, 20, 30 };
-    int pqRuns    = 2;
-    int pqRngSeed = 7;
-
-    // ── Graph Coloring ─────────────────────────────────────────────────────────
-    // Random antenna instances
-    std::vector<int>    coloringAntennaCounts = { 5, 8, 10, 12, 14, 16, 18, 20, 25, 30 };
-    std::vector<double> coloringRadii         = { 500.0, 1000.0, 2000.0 };
-    // Brute force wall-clock limit (seconds) — run is recorded as DNF if exceeded
-    double coloringBruteForceTimeout = 20.0;
-    int    coloringRngSeed = 13;
-
-    // ── Hard coloring instances — forces BF to explore large search spaces ────
-    // We generate one Petersen-like graph (triangle-free, chromatic number = 3)
-    // and one dense near-complete graph per size to stress BF.
-    //std::vector<int> hardColoringAntennaCounts = { 10, 15, 20 };
-    std::vector<int> hardColoringAntennaCounts = { 10 };
-
-    // ── Quadtree vs BruteForce — interference graph construction ─────────────
-    // Benchmark: for each node set, build a full interference graph using
-    // (a) Quadtree range queries  (b) O(n²) brute-force scan.
-    // This is the actual use-case in the coloring solver.
-    std::vector<int>    quadtreeNodeCounts = {
-            100000, 200000
-    };
-    std::vector<double> quadtreeRadii = { 200.0 };
-    int quadtreeRngSeed = 99;
-
-    std::vector<int> correctnessVertexCounts = { 100, 500, 1000, 5000, 10000 };
-    std::vector<int> correctnessAvgDegrees   = { 5, 15, 30 };
-    int correctnessPairsPerGraph = 20;  ///< (src, dst) pairs checked per graph
-    int correctnessRngSeed       = 2024;
-
-    // ── UTM coordinate bounding box (Porto area) ──────────────────────────────
-    double coordMinX = 526000.0;
-    double coordMaxX = 536000.0;
-    double coordMinY = 4554000.0;
-    double coordMaxY = 4560000.0;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// One row of result data — written to CSV
-// ─────────────────────────────────────────────────────────────────────────────
-
-struct BenchmarkRow {
-    std::string benchmark;       ///< "dijkstra_astar", "priority_queues", "coloring", "quadtree"
-    std::string variant;         ///< Algorithm/PQ label
-    int         paramN    = 0;   ///< Primary size (vertices / antennas / nodes)
-    double      paramP    = 0;   ///< Secondary param (avg degree / radius)
-    double      elapsedS  = 0;   ///< Wall-clock seconds (average when multiple runs)
-    double      quality   = 0;   ///< Algorithm-specific quality metric
-    std::string qualityLabel;    ///< What quality means
-    bool        dnf       = false;
-    std::string notes;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Benchmark runner
-// ─────────────────────────────────────────────────────────────────────────────
 
 class Benchmark {
 public:
-    explicit Benchmark(BenchmarkConfig cfg = {});
+    struct CacheConfig {
+        bool enabled = true;
+    };
 
-    void runAll();
+    struct PriorityQueueConfig {
+        std::vector<std::size_t> graphSizes = {100, 500, 1000};
+        std::vector<double> connectivities = {0.01, 0.05, 0.10};
+        unsigned repetitions = 3;
+        unsigned warmupRuns = 1;
+        std::uint32_t seed = 12345;
+        CacheConfig cache{};
+    };
 
-    void runDijkstraVsAstar();
-    void runPriorityQueues();
-    void runColoring();
-    void runQuadtree();
-    void runPrim();
+    struct InterferenceGraphConfig {
+        std::vector<std::size_t> nodeCounts = {1000, 5000, 10000};
+        std::vector<double> radii = {25.0, 50.0, 100.0};
+        double coordinateMax = 10000.0;
+        unsigned repetitions = 3;
+        unsigned warmupRuns = 1;
+        std::uint32_t seed = 12345;
+        CacheConfig cache{};
+    };
 
-    /// Times fn(); returns elapsed seconds.
-    double timed(const std::function<void()>& fn) const;
-    BenchmarkConfig cfg;
-    void record(BenchmarkRow row);
+    struct ColoringConfig {
+        std::vector<std::size_t> nodeCounts = {8, 10, 12};
+        std::vector<double> radii = {2000.0, 3500.0};
+        double coordinateMax = 10000.0;
+        unsigned repetitions = 3;
+        unsigned warmupRuns = 1;
+        std::uint32_t seed = 12345;
+        bool runBruteForce = true;
+        CacheConfig cache{};
+    };
+
+    struct ShortestPathConfig {
+        std::vector<std::size_t> graphSizes = {100, 500, 1000};
+        std::vector<double> connectivities = {0.01, 0.05, 0.10};
+        unsigned repetitions = 3;
+        unsigned warmupRuns = 1;
+        std::uint32_t seed = 12345;
+        CacheConfig cache{};
+    };
+
+    struct PrimConfig {
+        std::vector<std::size_t> graphSizes = {100, 500, 1000};
+        std::vector<double> connectivities = {0.01, 0.05, 0.10};
+        unsigned repetitions = 3;
+        unsigned warmupRuns = 1;
+        std::uint32_t seed = 12345;
+        CacheConfig cache{};
+    };
+
+    struct Config {
+        std::string outputDirectory = "../benchmark";
+        PriorityQueueConfig priorityQueues{};
+        InterferenceGraphConfig interference{};
+        ColoringConfig coloring{};
+        ShortestPathConfig shortestPath{};
+        PrimConfig prim{};
+
+        bool runPriorityQueues = true;
+        bool runInterferenceGraph = true;
+        bool runColoring = true;
+        bool runShortestPath = true;
+        bool runPrim = true;
+    };
+
+    Benchmark();
+    explicit Benchmark(Config config);
+
+    void run();
+    void runPriorityQueueBenchmarks();
+    void runInterferenceGraphBenchmarks();
+    void runColoringBenchmarks();
+    void runShortestPathBenchmarks();
+    void runPrimBenchmarks();
 
 private:
-    std::vector<BenchmarkRow> rows;
+    struct Measurement {
+        double milliseconds = 0.0;
+        long long cacheMisses = -1;
+        long long cacheReferences = -1;
+        std::size_t rssBeforeBytes = 0;
+        std::size_t rssAfterBytes = 0;
+    };
 
-    Multigraph buildRandomGraph(int V, int avgDeg, int seed) const;
-    void writeCSV(const std::string& filename,
-                  const std::vector<BenchmarkRow>& subset) const;
-    void writeAllCSVs() const;
+    struct Point {
+        std::size_t id = 0;
+        double x = 0.0;
+        double y = 0.0;
+    };
 
-    /// Write a temporary coloring JSON and return a loaded Coloring object.
-    Coloring buildColoringInstance(int N, double radius, int seed) const;
+    Config cfg;
 
-    /// Run BF with a wall-clock timeout; returns elapsed and marks dnf if exceeded.
-    struct BFResult { double elapsed; int colorsUsed; bool dnf; bool feasible; };
-    BFResult runBruteForceWithTimeout(const Coloring& col) const;
+    static std::string pqName(PriorityQueueSelected pqs);
+    static std::string csvEscape(const std::string& s);
+    static void ensureDirectory(const std::string& path);
+    static void appendLine(const std::string& path, const std::string& header, const std::string& line);
+    static Measurement measure(const std::function<void()>& fn, bool collectCacheMisses);
+    static std::size_t currentRSSBytes();
+
+    static Multigraph generateGraph(std::size_t n, double connectivity, std::uint32_t seed);
+    static std::vector<Point> generatePoints(std::size_t n, double coordinateMax, std::uint32_t seed);
+    static std::string writeColoringJson(const std::string& dir, const std::vector<Point>& points, double radius,
+                                         std::size_t n, unsigned repetition, std::uint32_t seed);
+
+    static double pathCostOrDist(const Multigraph& graph, std::size_t destId);
+    static std::uint64_t mstSelectedEdgeCount(const Multigraph& graph);
+    static std::uint64_t checksumPath(const Multigraph& graph);
+
+    static std::vector<std::pair<std::size_t, std::size_t>> buildInterferenceBruteForce(
+            const std::vector<Point>& points, double radius, QuadtreeStats& stats);
+
+    static std::vector<std::pair<std::size_t, std::size_t>> buildInterferenceQuadtree(
+            const std::vector<Point>& points, double radius, QuadtreeStats& stats,
+            double& buildMs, std::size_t& estimatedQtBytes);
+
+    static std::uint64_t edgeChecksum(const std::vector<std::pair<std::size_t, std::size_t>>& edges);
 };
 
 #endif // EDAA_BENCHMARK_H

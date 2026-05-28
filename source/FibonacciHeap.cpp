@@ -131,6 +131,8 @@ FibonacciHeap::FibNode* FibonacciHeap::_decreaseKey(FibNode* heap, FibNode* n) {
 }
 
 void FibonacciHeap::insert(Vertex* v) {
+    countInsert();
+
     FibNode* n = new FibNode(v);
     nodeMap[v] = n;
     heap_ = _merge(heap_, n);
@@ -139,6 +141,8 @@ void FibonacciHeap::insert(Vertex* v) {
 
 Vertex* FibonacciHeap::extractMin() {
     if (!heap_) return nullptr;
+    countDelete();
+
     FibNode* old = heap_;
     heap_ = _removeMinimum(heap_);
     Vertex* result = old->vertex;
@@ -149,6 +153,8 @@ Vertex* FibonacciHeap::extractMin() {
 }
 
 void FibonacciHeap::decreaseKey(Vertex* v) {
+    countUpdateKey();
+
     /// Vertex dist was already updated by the caller (Dijkstra/Prim)
     FibNode* n = nodeMap[v];
     heap_ = _decreaseKey(heap_, n);
