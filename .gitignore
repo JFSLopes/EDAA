@@ -6,5 +6,6 @@ porto_walk.graphml
 *.csv
 *.png
 *.json
+*.gif
 venv
 build

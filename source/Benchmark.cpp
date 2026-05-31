@@ -44,13 +44,15 @@ void Benchmark::runPriorityQueueBenchmarks() {
     ensureDirectory(cfg.outputDirectory);
     const std::string file = cfg.outputDirectory + "/priority_queues.csv";
     const std::string header =
-            "seed,repetition,n,connectivity,pq,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
+            "seed,repetition,n,average_degree,pq,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
             "rss_delta_bytes,inserts,deletes,decrease_keys,dest_dist,path_checksum,matches_reference";
+
+    std::cout << "Running Priority Queue Benchmarks\n";
 
     const std::vector<PriorityQueueSelected> queues = {BRUTE_FORCE, MUTABLE_PRIORITY_QUEUE, FIBONACCI_HEAP};
 
     for (std::size_t n : cfg.priorityQueues.graphSizes) {
-        for (double conn : cfg.priorityQueues.connectivities) {
+        for (double conn : cfg.priorityQueues.averageDegrees) {
 
             const unsigned totalRuns = cfg.priorityQueues.warmupRuns + cfg.priorityQueues.repetitions;
 
@@ -63,12 +65,13 @@ void Benchmark::runPriorityQueueBenchmarks() {
                 std::uint64_t referenceChecksum = 0;
 
                 for (PriorityQueueSelected pq : queues) {
+                    std::cout << "Run: " << run << " - Number of nodes: " << n << " - average_degree: " << conn << " - " << pqName(pq) << "\n";
                     Multigraph g = generateGraph(n, conn, seed);
                     const auto src = g.getVertex(0);
                     const auto dst = g.getVertex((u_int)n - 1);
 
                     PriorityQueue::resetStats();
-                    Measurement m = measure([&] { g.dijkstra(src, dst, pq); }, cfg.priorityQueues.cache.enabled);
+                    Measurement m = measure([&] { g.prim(src, pq); }, cfg.priorityQueues.cache.enabled);
                     PriorityQueueStats stats = PriorityQueue::getStats();
 
                     double dist = pathCostOrDist(g, n - 1);
@@ -108,6 +111,8 @@ void Benchmark::runInterferenceGraphBenchmarks() {
             "rss_before_bytes,rss_after_bytes,rss_delta_bytes,estimated_structure_bytes,edges,edge_checksum,matches_reference,"
             "nodes_visited,nodes_pruned,box_checks,distance_checks,checks_per_second";
 
+    std::cout << "Running Interference graph Benchmarks\n";
+
     for (std::size_t n : cfg.interference.nodeCounts) {
         for (double radius : cfg.interference.radii) {
 
@@ -123,6 +128,7 @@ void Benchmark::runInterferenceGraphBenchmarks() {
                 QuadtreeStats bruteStats{};
                 std::vector<std::pair<std::size_t, std::size_t>> bruteEdges;
 
+                std::cout << "Run: " << run << " - Number of nodes: " << n << " - Brute force\n";
                 Measurement bruteM = measure([&] {
                     bruteEdges = buildInterferenceBruteForce(points, radius, bruteStats);
                 }, cfg.interference.cache.enabled);
@@ -136,6 +142,8 @@ void Benchmark::runInterferenceGraphBenchmarks() {
                 std::vector<std::pair<std::size_t, std::size_t>> qtEdges;
                 double qtBuildMs = 0.0;
                 std::size_t qtBytes = 0;
+
+                std::cout << "Run: " << run << " - Number of nodes: " << n << " - Quadtree force\n";
 
                 Measurement qtM = measure([&] {
                     qtEdges = buildInterferenceQuadtree(points, radius, qtStats, qtBuildMs, qtBytes);
@@ -206,7 +214,9 @@ void Benchmark::runColoringBenchmarks() {
     const std::string file = cfg.outputDirectory + "/coloring.csv";
     const std::string header =
             "seed,repetition,n,radius,approach,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
-            "rss_delta_bytes,feasible,colors_used,valid,matches_optimal";
+            "rss_delta_bytes,num_conflict_edges,feasible,colors_used,valid,matches_optimal";
+
+    std::cout << "Running Coloring Benchmark\n";
 
     for (std::size_t n : cfg.coloring.nodeCounts) {
         for (double radius : cfg.coloring.radii) {
@@ -223,8 +233,10 @@ void Benchmark::runColoringBenchmarks() {
 
                 int optimalColors = -1;
                 if (cfg.coloring.runBruteForce) {
+                    std::cout << "Run: " << run << " - Number of nodes: " << n << " - Radius: " << radius << " - Brute force\n";
+
                     Coloring c;
-                    c.loadFromJson(json);
+                    size_t num_edges = c.loadFromJson(json);
                     Coloring::Solution sol;
                     Measurement m = measure([&] { sol = c.solveBruteForce(); }, cfg.coloring.cache.enabled);
                     optimalColors = sol.colorsUsed;
@@ -236,14 +248,18 @@ void Benchmark::runColoringBenchmarks() {
                              << m.cacheMisses << ',' << m.cacheReferences << ','
                              << m.rssBeforeBytes << ',' << m.rssAfterBytes << ','
                              << static_cast<long long>(m.rssAfterBytes) - static_cast<long long>(m.rssBeforeBytes) << ','
+                             << num_edges << ','
                              << sol.feasible << ',' << sol.colorsUsed << ',' << c.isValid(sol) << ",1";
                         appendLine(file, header, line.str());
                     }
                 }
 
                 Coloring c;
-                c.loadFromJson(json);
+                size_t num_edges = c.loadFromJson(json);
                 Coloring::Solution sol;
+
+                std::cout << "Run: " << run << " - Number of nodes: " << n << " - Radius: " << radius << " - Welsh Powell\n";
+
                 Measurement m = measure([&] { sol = c.solveWelshPowell(); }, cfg.coloring.cache.enabled);
                 const bool matchesOptimal = optimalColors < 0 || sol.colorsUsed == optimalColors;
                 std::ostringstream line;
@@ -257,6 +273,7 @@ void Benchmark::runColoringBenchmarks() {
                      << m.cacheMisses << ',' << m.cacheReferences << ','
                      << m.rssBeforeBytes << ',' << m.rssAfterBytes << ','
                      << static_cast<long long>(m.rssAfterBytes) - static_cast<long long>(m.rssBeforeBytes) << ','
+                     << num_edges << ','
                      << sol.feasible << ',' << sol.colorsUsed << ',' << c.isValid(sol) << ',' << matchesOptimal;
                 appendLine(file, header, line.str());
             }
@@ -268,11 +285,13 @@ void Benchmark::runShortestPathBenchmarks() {
     ensureDirectory(cfg.outputDirectory);
     const std::string file = cfg.outputDirectory + "/shortest_path.csv";
     const std::string header =
-            "seed,repetition,n,connectivity,algorithm,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
+            "seed,repetition,n,average_degree,algorithm,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
             "rss_delta_bytes,dest_dist,path_checksum,matches_reference";
 
+    std::cout << "Running Shortest Path Benchmarks\n";
+
     for (std::size_t n : cfg.shortestPath.graphSizes) {
-        for (double conn : cfg.shortestPath.connectivities) {
+        for (double conn : cfg.shortestPath.averageDegrees) {
 
             const unsigned totalRuns = cfg.shortestPath.warmupRuns + cfg.shortestPath.repetitions;
 
@@ -285,6 +304,7 @@ void Benchmark::runShortestPathBenchmarks() {
                 std::uint64_t refChecksum = 0;
 
                 for (const std::string& alg : {std::string("dijkstra_fibonacci"), std::string("astar_fibonacci")}) {
+                    std::cout << "Run: " << run << " - Number of nodes: " << n << " - average_degree: " << conn << " - " << alg << "\n";
                     Multigraph g = generateGraph(n, conn, seed);
                     auto src = g.getVertex(0);
                     auto dst = g.getVertex((u_int)n - 1);
@@ -320,11 +340,13 @@ void Benchmark::runPrimBenchmarks() {
     ensureDirectory(cfg.outputDirectory);
     const std::string file = cfg.outputDirectory + "/prim.csv";
     const std::string header =
-            "seed,repetition,n,connectivity,pq,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
+            "seed,repetition,n,average_degree,pq,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
             "rss_delta_bytes,visited_vertices,selected_edges,matches_reference";
 
+    std::cout << "Running Prim Benchmarks\n";
+
     for (std::size_t n : cfg.prim.graphSizes) {
-        for (double conn : cfg.prim.connectivities) {
+        for (double conn : cfg.prim.averageDegrees) {
 
             const unsigned totalRuns = cfg.prim.warmupRuns + cfg.prim.repetitions;
 
@@ -336,6 +358,7 @@ void Benchmark::runPrimBenchmarks() {
                 std::uint64_t refEdges = 0;
                 std::size_t refVisited = 0;
                 for (PriorityQueueSelected pq : {FIBONACCI_HEAP, MUTABLE_PRIORITY_QUEUE}) {
+                    std::cout << "Run: " << run << " - Number of nodes: " << n << " - average_degree: " << conn << " - " << pqName(pq) << "\n";
                     Multigraph g = generateGraph(n, conn, seed);
                     std::vector<std::shared_ptr<Vertex>> mst;
                     Measurement m = measure([&] { mst = g.prim(g.getVertex(0), pq); }, cfg.prim.cache.enabled);
@@ -462,31 +485,107 @@ std::size_t Benchmark::currentRSSBytes() {
 #endif
 }
 
-Multigraph Benchmark::generateGraph(std::size_t n, double connectivity, std::uint32_t seed) {
-    if (n < 2) throw std::invalid_argument("Benchmark graph must have at least 2 vertices");
+Multigraph Benchmark::generateGraph(std::size_t n, unsigned averageDegree, std::uint32_t seed) {
+    if (n < 2) {
+        throw std::invalid_argument("Benchmark graph must have at least 2 vertices");
+    }
+
+    if (averageDegree < 2) {
+        averageDegree = 2;
+    }
 
     std::mt19937 rng(seed);
-    std::uniform_real_distribution<double> coord(0.0, 10000.0);
-    std::uniform_real_distribution<double> prob(0.0, 1.0);
 
-    Multigraph g;
-    for (std::size_t i = 0; i < n; ++i) {
-        g.addVertex(coord(rng), coord(rng), "v" + std::to_string(i));
-    }
+    std::uniform_real_distribution<double> coordX(526000.0, 536000.0);
+    std::uniform_real_distribution<double> coordY(4554000.0, 4560000.0);
+    std::uniform_int_distribution<int> modeD(0, 2);
+    std::uniform_int_distribution<std::size_t> vtxD(0, n - 1);
 
-    auto weight = [&](std::size_t a, std::size_t b) {
-        return g.getVertex((u_int)a)->getCoordinates().distanceTo(g.getVertex((u_int)b)->getCoordinates()) / SPEED_BUS + 1.0;
+    static const double SPEEDS[] = {
+            SPEED_WALK,
+            SPEED_BUS,
+            SPEED_METRO
     };
 
-    // Always add a chain, so Dijkstra/Prim have a connected graph.
-    for (std::size_t i = 1; i < n; ++i) {
-        g.addEdge((u_int)(i - 1), (u_int)i, weight(i - 1, i), BUS);
-    }
+    Multigraph g;
+
+    std::vector<std::pair<double, double>> coords(n);
 
     for (std::size_t i = 0; i < n; ++i) {
-        for (std::size_t j = i + 2; j < n; ++j) {
-            if (prob(rng) <= connectivity) g.addEdge((u_int)i, (u_int)j, weight(i, j), BUS);
+        coords[i] = {coordX(rng), coordY(rng)};
+        g.addVertex(coords[i].first, coords[i].second, "v" + std::to_string(i));
+    }
+
+    auto makeWeight = [&](std::size_t a, std::size_t b, Mode mode) -> double {
+        const double dx = coords[a].first - coords[b].first;
+        const double dy = coords[a].second - coords[b].second;
+        const double dist = std::sqrt(dx * dx + dy * dy);
+
+        return dist / SPEEDS[static_cast<int>(mode)];
+    };
+
+    auto edgeKey = [](std::size_t a, std::size_t b) -> std::uint64_t {
+        if (a > b) {
+            std::swap(a, b);
         }
+
+        return (static_cast<std::uint64_t>(a) << 32)
+               ^ static_cast<std::uint64_t>(b);
+    };
+
+    std::unordered_set<std::uint64_t> seen;
+    seen.reserve(n * static_cast<std::size_t>(averageDegree));
+
+    // Random spanning tree first, guaranteeing connectivity.
+    for (std::size_t i = 1; i < n; ++i) {
+        std::uniform_int_distribution<std::size_t> parentD(0, i - 1);
+
+        const std::size_t j = parentD(rng);
+        const Mode mode = static_cast<Mode>(modeD(rng));
+
+        seen.insert(edgeKey(i, j));
+        g.addEdge(
+                static_cast<u_int>(i),
+                static_cast<u_int>(j),
+                makeWeight(i, j, mode),
+                mode
+        );
+    }
+
+    const std::size_t desiredEdges =
+            std::max<std::size_t>(n - 1, (n * static_cast<std::size_t>(averageDegree)) / 2);
+
+    const std::size_t extraTarget = desiredEdges - (n - 1);
+
+    std::size_t attempts = 0;
+    const std::size_t maxAttempts = extraTarget * 10 + 1000;
+
+    while (seen.size() < desiredEdges && attempts < maxAttempts) {
+        ++attempts;
+
+        std::size_t a = vtxD(rng);
+        std::size_t b = vtxD(rng);
+
+        if (a == b) {
+            continue;
+        }
+
+        const std::uint64_t key = edgeKey(a, b);
+
+        if (seen.find(key) != seen.end()) {
+            continue;
+        }
+
+        seen.insert(key);
+
+        const Mode mode = static_cast<Mode>(modeD(rng));
+
+        g.addEdge(
+                static_cast<u_int>(a),
+                static_cast<u_int>(b),
+                makeWeight(a, b, mode),
+                mode
+        );
     }
 
     return g;

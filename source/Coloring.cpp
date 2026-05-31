@@ -54,7 +54,7 @@ size_t Coloring::getAntennaCount() const {
 // }
 // ─────────────────────────────────────────────────────────────────────────────
 
-void Coloring::loadFromJson(const std::string& filepath) {
+size_t Coloring::loadFromJson(const std::string& filepath) {
     std::ifstream f(filepath);
     if (!f.is_open())
         throw std::runtime_error("Coloring: cannot open " + filepath);
@@ -115,7 +115,8 @@ void Coloring::loadFromJson(const std::string& filepath) {
     std::cout << "  Loaded " << antennas.size() << " antennas"
               << "  interference_radius=" << interferenceRadius << "m\n";
 
-    buildConflictGraph();
+    size_t edges = buildConflictGraph();
+    return edges;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ void Coloring::loadFromJson(const std::string& filepath) {
 // Uses a Quadtree for O(n log n) construction instead of O(n²).
 // ─────────────────────────────────────────────────────────────────────────────
 
-void Coloring::buildConflictGraph() {
+size_t Coloring::buildConflictGraph() {
     int N = (int)antennas.size();
     adj.assign(N, {});
 
@@ -152,6 +153,8 @@ void Coloring::buildConflictGraph() {
 
     std::cout << "  Conflict graph: " << N << " antennas, "
               << edges << " interference edges\n";
+
+    return edges;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,7 +210,6 @@ Coloring::Solution Coloring::solveBruteForce() const {
 
     for (int k = 1; k <= N; k++) {
         std::fill(sol.colorOf.begin(), sol.colorOf.end(), -1);
-        std::cout << "  Trying k=" << k << "...\n";
         if (bruteForceRec(0, k, order, sol.colorOf)) {
             sol.feasible   = true;
             sol.colorsUsed = k;
@@ -232,7 +234,7 @@ Coloring::Solution Coloring::solveBruteForce() const {
 Coloring::Solution Coloring::solveWelshPowell() const {
     int N = (int)antennas.size();
 
-    // Sort by degree descending
+    // Step 1 & 2: sort vertices by degree descending
     std::vector<int> order(N);
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](int a, int b) {
@@ -243,17 +245,29 @@ Coloring::Solution Coloring::solveWelshPowell() const {
     sol.colorOf.assign(N, -1);
     int colorsUsed = 0;
 
-    for (int i : order) {
-        // Find the lowest color not used by any neighbour
-        std::vector<bool> used(colorsUsed + 1, false);
-        for (int nb : adj[i])
-            if (sol.colorOf[nb] >= 0 && sol.colorOf[nb] < (int)used.size())
-                used[sol.colorOf[nb]] = true;
+    // Steps 3-5: one pass per color
+    int currentColor = 0;
+    while (true) {
+        // Check if all vertices are colored
+        bool anyUncolored = false;
+        for (int i = 0; i < N; i++)
+            if (sol.colorOf[i] == -1) { anyUncolored = true; break; }
+        if (!anyUncolored) break;
 
-        int c = 0;
-        while (c < (int)used.size() && used[c]) c++;
-        sol.colorOf[i] = c;
-        colorsUsed = std::max(colorsUsed, c + 1);
+        // Walk the ordered list and assign currentColor to every uncolored
+        // vertex that has no neighbour already holding currentColor
+        for (int i : order) {
+            if (sol.colorOf[i] != -1) continue; // already colored
+
+            bool conflict = false;
+            for (int nb : adj[i])
+                if (sol.colorOf[nb] == currentColor) { conflict = true; break; }
+
+            if (!conflict)
+                sol.colorOf[i] = currentColor;
+        }
+
+        colorsUsed = ++currentColor;
     }
 
     sol.feasible   = true;

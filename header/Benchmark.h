@@ -21,49 +21,49 @@ public:
     };
 
     struct PriorityQueueConfig {
-        std::vector<std::size_t> graphSizes = {100, 500, 1000};
-        std::vector<double> connectivities = {0.01, 0.05, 0.10};
+        std::vector<std::size_t> graphSizes = {20000, 30000, 50000};
+        std::vector<unsigned> averageDegrees = {40, 80, 160};
         unsigned repetitions = 3;
-        unsigned warmupRuns = 1;
+        unsigned warmupRuns = 0;
         std::uint32_t seed = 12345;
         CacheConfig cache{};
     };
 
     struct InterferenceGraphConfig {
-        std::vector<std::size_t> nodeCounts = {1000, 5000, 10000};
-        std::vector<double> radii = {25.0, 50.0, 100.0};
-        double coordinateMax = 10000.0;
+        std::vector<std::size_t> nodeCounts = {1000, 2500, 5000, 10000, 20000};
+        std::vector<double> radii = {250.0, 500.0, 1000.0, 2000.0};
+        double coordinateMax = 100000.0;
         unsigned repetitions = 3;
-        unsigned warmupRuns = 1;
+        unsigned warmupRuns = 0;
         std::uint32_t seed = 12345;
         CacheConfig cache{};
     };
 
     struct ColoringConfig {
-        std::vector<std::size_t> nodeCounts = {8, 10, 12};
-        std::vector<double> radii = {2000.0, 3500.0};
+        std::vector<std::size_t> nodeCounts = {32, 64, 100};
+        std::vector<double> radii = {100.0, 200.0, 300.0, 500.0, 1000.0};
         double coordinateMax = 10000.0;
-        unsigned repetitions = 3;
-        unsigned warmupRuns = 1;
+        unsigned repetitions = 2;
+        unsigned warmupRuns = 0;
         std::uint32_t seed = 12345;
         bool runBruteForce = true;
         CacheConfig cache{};
     };
 
     struct ShortestPathConfig {
-        std::vector<std::size_t> graphSizes = {100, 500, 1000};
-        std::vector<double> connectivities = {0.01, 0.05, 0.10};
+        std::vector<std::size_t> graphSizes = {20000, 30000, 50000};
+        std::vector<unsigned> averageDegrees = {80, 160, 320};
         unsigned repetitions = 3;
-        unsigned warmupRuns = 1;
+        unsigned warmupRuns = 0;
         std::uint32_t seed = 12345;
         CacheConfig cache{};
     };
 
     struct PrimConfig {
-        std::vector<std::size_t> graphSizes = {100, 500, 1000};
-        std::vector<double> connectivities = {0.01, 0.05, 0.10};
+        std::vector<std::size_t> graphSizes = {20000, 30000, 50000};
+        std::vector<unsigned> averageDegrees = {80, 160, 320};
         unsigned repetitions = 3;
-        unsigned warmupRuns = 1;
+        unsigned warmupRuns = 0;
         std::uint32_t seed = 12345;
         CacheConfig cache{};
     };
@@ -76,11 +76,11 @@ public:
         ShortestPathConfig shortestPath{};
         PrimConfig prim{};
 
-        bool runPriorityQueues = true;
-        bool runInterferenceGraph = true;
+        bool runPriorityQueues = false;
+        bool runInterferenceGraph = false;
         bool runColoring = true;
-        bool runShortestPath = true;
-        bool runPrim = true;
+        bool runShortestPath = false;
+        bool runPrim = false;
     };
 
     Benchmark();
@@ -117,7 +117,7 @@ private:
     static Measurement measure(const std::function<void()>& fn, bool collectCacheMisses);
     static std::size_t currentRSSBytes();
 
-    static Multigraph generateGraph(std::size_t n, double connectivity, std::uint32_t seed);
+    static Multigraph generateGraph(std::size_t n, unsigned averageDegree, std::uint32_t seed);
     static std::vector<Point> generatePoints(std::size_t n, double coordinateMax, std::uint32_t seed);
     static std::string writeColoringJson(const std::string& dir, const std::vector<Point>& points, double radius,
                                          std::size_t n, unsigned repetition, std::uint32_t seed);
