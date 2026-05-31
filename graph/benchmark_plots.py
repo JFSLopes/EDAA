@@ -7,18 +7,8 @@ Usage:
 Expected input directory:
     ../benchmark/
 
-Expected CSV files:
-    ../benchmark/priority_queues.csv
-    ../benchmark/interference_graph.csv
-    ../benchmark/coloring.csv
-    ../benchmark/shortest_path.csv
-    ../benchmark/prim.csv
-
 Output:
     ../benchmark/plots/*.png
-
-This version intentionally creates fewer, more useful plots by grouping related
-metrics together into summary figures.
 """
 
 from __future__ import annotations
@@ -28,6 +18,7 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
 
 BENCHMARK_DIR = Path("../benchmark")
@@ -48,7 +39,7 @@ def setup_style() -> None:
         "axes.titlesize": 12,
         "axes.labelsize": 10,
         "legend.fontsize": 8,
-        "figure.autolayout": True,
+        "figure.autolayout": False,
     })
 
 
@@ -87,122 +78,522 @@ def has_columns(df: pd.DataFrame, columns: list[str]) -> bool:
     return all(col in df.columns for col in columns)
 
 
-def has_cache_data(df: pd.DataFrame) -> bool:
-    if "cache_misses" not in df.columns:
-        return False
-
-    misses = pd.to_numeric(df["cache_misses"], errors="coerce")
-    return (misses >= 0).any()
+def safe_filename(value) -> str:
+    return str(value).replace(".", "_").replace(" ", "_").replace("/", "_")
 
 
-def mean_by(df: pd.DataFrame, group_cols: list[str], value_col: str) -> pd.DataFrame:
+def numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     data = df.copy()
-    data[value_col] = pd.to_numeric(data[value_col], errors="coerce")
-    data = data.dropna(subset=[value_col])
+
+    for col in cols:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    return data
+
+
+def mean_by(
+        df: pd.DataFrame,
+        group_cols: list[str],
+        value_cols: list[str],
+) -> pd.DataFrame:
+    data = numeric(df, value_cols)
+
+    needed = group_cols + value_cols
+    data = data.dropna(subset=[c for c in needed if c in data.columns])
 
     if data.empty:
         return data
 
-    return data.groupby(group_cols, as_index=False)[value_col].mean()
+    return data.groupby(group_cols, as_index=False)[value_cols].mean()
 
 
-def plot_grouped_lines(
-        ax,
+def find_col_value(
         df: pd.DataFrame,
-        *,
-        x: str,
-        y: str,
-        group_cols: list[str],
-        label_cols: list[str],
-        xlabel: str,
-        ylabel: str,
-        title: str,
-) -> None:
-    needed = [x, y] + group_cols
-    if not has_columns(df, needed):
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "Missing columns", ha="center", va="center")
-        ax.axis("off")
+        col: str,
+        keywords: list[str],
+) -> Optional[str]:
+    if col not in df.columns:
+        return None
+
+    values = df[col].dropna().astype(str).unique()
+
+    for keyword in keywords:
+        for value in values:
+            if keyword.lower() in value.lower():
+                return value
+
+    return None
+
+
+def filter_name_contains(
+        df: pd.DataFrame,
+        col: str,
+        keywords: list[str],
+) -> pd.DataFrame:
+    if col not in df.columns:
+        return pd.DataFrame()
+
+    pattern = "|".join(keywords)
+
+    return df[
+        df[col].astype(str).str.contains(pattern, case=False, regex=True)
+    ].copy()
+
+
+def is_brute_force_name(value) -> bool:
+    name = str(value).lower()
+
+    return (
+            "brute" in name
+            or "linear" in name
+            or "array" in name
+            or "naive" in name
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Shortest path
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def plot_shortest_path() -> None:
+    df = read_csv("shortest_path.csv")
+    if df is None:
         return
 
-    data = mean_by(df, group_cols, y)
+    required = ["n", "average_degree", "algorithm", "time_ms"]
 
-    if data.empty:
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        ax.axis("off")
+    if not has_columns(df, required):
+        print("[skip] shortest_path.csv missing required columns")
+        print(f"       required: {required}")
+        print(f"       found:    {list(df.columns)}")
         return
 
-    data[x] = pd.to_numeric(data[x], errors="coerce")
-    data = data.dropna(subset=[x])
+    data = mean_by(
+        df,
+        ["n", "average_degree", "algorithm"],
+        ["time_ms"],
+    )
 
-    for key, sub in data.groupby(label_cols):
-        sub = sub.sort_values(x)
+    dijkstra_name = find_col_value(data, "algorithm", ["dijkstra"])
+    astar_name = find_col_value(data, "algorithm", ["a*", "astar", "a_star", "a"])
 
-        if isinstance(key, tuple):
-            label = ", ".join(f"{col}={value}" for col, value in zip(label_cols, key))
-        else:
-            label = f"{label_cols[0]}={key}"
+    if dijkstra_name is None or astar_name is None:
+        print("[skip] could not identify Dijkstra and A* algorithm names")
+        print(f"       algorithms found: {sorted(data['algorithm'].astype(str).unique())}")
+        return
 
-        ax.plot(sub[x], sub[y], marker="o", linewidth=2, label=label)
+    dijkstra = data[data["algorithm"].astype(str) == str(dijkstra_name)].copy()
+    astar = data[data["algorithm"].astype(str) == str(astar_name)].copy()
 
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.legend(fontsize=7)
+    merged = dijkstra.merge(
+        astar,
+        on=["n", "average_degree"],
+        suffixes=("_dijkstra", "_astar"),
+    )
 
+    if merged.empty:
+        print("[skip] no matching Dijkstra/A* rows for same n and average_degree")
+        return
+
+    merged["speedup"] = merged["time_ms_dijkstra"] / merged["time_ms_astar"]
+    merged = merged.replace([np.inf, -np.inf], np.nan)
+    merged = merged.dropna(subset=["speedup"])
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.suptitle("Shortest Path: A* Speedup over Dijkstra", fontsize=15)
+
+    for average_degree, sub in merged.groupby("average_degree"):
+        sub = sub.sort_values("n")
+
+        ax.plot(
+            sub["n"],
+            sub["speedup"],
+            marker="o",
+            linewidth=2,
+            label=f"average degree = {average_degree}",
+        )
+
+    ax.axhline(
+        1.0,
+        color="black",
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.8,
+        label="baseline: same speed",
+    )
+
+    ax.set_title("Speedup = Dijkstra time / A* time")
+    ax.set_xlabel("Number of nodes")
+    ax.set_ylabel("A* speedup over Dijkstra")
+
+    ax.legend(fontsize=8)
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    save_plot("shortest_path_astar_speedup.png")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Priority queues
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def plot_priority_queues() -> None:
     df = read_csv("priority_queues.csv")
     if df is None:
         return
 
-    fig, axes = plt.subplots(2, 2, figsize=(15, 9))
-    fig.suptitle("Priority Queue Implementations", fontsize=15)
+    required = ["n", "average_degree", "pq", "time_ms"]
 
-    metrics = [
-        ("time_ms", "Runtime (ms)", "Runtime"),
-        ("rss_delta_bytes", "RSS delta (bytes)", "Memory delta"),
-        ("decrease_keys", "Decrease-key count", "Decrease-key operations"),
-        ("matches_reference", "Fraction matching reference", "Correctness"),
-    ]
+    if not has_columns(df, required):
+        print("[skip] priority_queues.csv missing required columns")
+        print(f"       required: {required}")
+        print(f"       found:    {list(df.columns)}")
+        return
 
-    for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-        plot_grouped_lines(
-            ax,
-            df,
-            x="n",
-            y=metric,
-            group_cols=["n", "connectivity", "pq"],
-            label_cols=["connectivity", "pq"],
-            xlabel="Number of vertices",
-            ylabel=ylabel,
-            title=title,
+    data = mean_by(
+        df,
+        ["n", "average_degree", "pq"],
+        ["time_ms"],
+    )
+
+    data["is_brute_force"] = data["pq"].apply(is_brute_force_name)
+
+    heap_data = data[~data["is_brute_force"]].copy()
+    brute_data = data[data["is_brute_force"]].copy()
+
+    if heap_data.empty:
+        print("[warn] No non-brute-force priority queues found; plotting all PQs.")
+        heap_data = data.copy()
+
+    for average_degree, sub_degree in heap_data.groupby("average_degree"):
+        fig, ax = plt.subplots(figsize=(11, 6))
+
+        fig.suptitle(
+            f"Priority Queue Runtime — Average Degree {average_degree}",
+            fontsize=15,
         )
 
-    save_plot("priority_queues_summary.png")
+        for pq, sub in sub_degree.groupby("pq"):
+            sub = sub.sort_values("n")
 
-    if has_cache_data(df):
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-        fig.suptitle("Priority Queue Cache Metrics", fontsize=15)
-
-        for ax, metric, ylabel in [
-            (axes[0], "cache_misses", "Cache misses"),
-            (axes[1], "cache_references", "Cache references"),
-        ]:
-            plot_grouped_lines(
-                ax,
-                df,
-                x="n",
-                y=metric,
-                group_cols=["n", "connectivity", "pq"],
-                label_cols=["connectivity", "pq"],
-                xlabel="Number of vertices",
-                ylabel=ylabel,
-                title=ylabel,
+            ax.plot(
+                sub["n"],
+                sub["time_ms"],
+                marker="o",
+                linewidth=2,
+                label=str(pq),
             )
 
-        save_plot("priority_queues_cache.png")
+        ax.set_title("Heap implementations only")
+        ax.set_xlabel("Number of nodes")
+        ax.set_ylabel("Time (ms)")
+
+        ax.legend(fontsize=8)
+        fig.tight_layout(rect=[0, 0, 1, 0.92])
+
+        save_plot(
+            f"priority_queues_heap_time_degree_{safe_filename(average_degree)}.png"
+        )
+
+    if not brute_data.empty and not heap_data.empty:
+        best_heap = (
+            heap_data.groupby(["n", "average_degree"], as_index=False)["time_ms"]
+            .min()
+            .rename(columns={"time_ms": "best_heap_time_ms"})
+        )
+
+        brute_avg = (
+            brute_data.groupby(["n", "average_degree"], as_index=False)["time_ms"]
+            .mean()
+            .rename(columns={"time_ms": "brute_force_time_ms"})
+        )
+
+        slowdown = brute_avg.merge(best_heap, on=["n", "average_degree"])
+
+        slowdown["brute_force_slowdown"] = (
+                slowdown["brute_force_time_ms"] / slowdown["best_heap_time_ms"]
+        )
+
+        slowdown = slowdown.replace([np.inf, -np.inf], np.nan)
+        slowdown = slowdown.dropna(subset=["brute_force_slowdown"])
+
+        if not slowdown.empty:
+            fig, ax = plt.subplots(figsize=(11, 6))
+            fig.suptitle("Priority Queue Brute-Force Slowdown", fontsize=15)
+
+            for average_degree, sub in slowdown.groupby("average_degree"):
+                sub = sub.sort_values("n")
+
+                ax.plot(
+                    sub["n"],
+                    sub["brute_force_slowdown"],
+                    marker="o",
+                    linewidth=2,
+                    label=f"average degree = {average_degree}",
+                )
+
+            ax.axhline(
+                1.0,
+                color="black",
+                linestyle="--",
+                linewidth=1.2,
+                alpha=0.8,
+            )
+
+            ax.set_title("Brute force time / best heap time")
+            ax.set_xlabel("Number of nodes")
+            ax.set_ylabel("Slowdown factor")
+
+            ax.legend(fontsize=8)
+            fig.tight_layout(rect=[0, 0, 1, 0.92])
+            save_plot("priority_queues_bruteforce_slowdown.png")
+
+    if not has_columns(df, ["n", "average_degree", "pq", "cache_misses"]):
+        print("[skip] priority queue cache plot missing cache_misses")
+        return
+
+    cache = filter_name_contains(
+        df,
+        "pq",
+        ["fib", "fibonacci", "binary", "mutable"],
+    )
+
+    if cache.empty:
+        cache = df[~df["pq"].apply(is_brute_force_name)].copy()
+
+    if cache.empty:
+        cache = df.copy()
+
+    cache_data = mean_by(
+        cache,
+        ["n", "average_degree", "pq"],
+        ["cache_misses"],
+    )
+
+    cache_data = cache_data[~cache_data["pq"].apply(is_brute_force_name)].copy()
+
+    for average_degree, sub_degree in cache_data.groupby("average_degree"):
+        fig, ax = plt.subplots(figsize=(11, 6))
+
+        fig.suptitle(
+            f"Priority Queue Cache Misses — Average Degree {average_degree}",
+            fontsize=15,
+        )
+
+        for pq, sub in sub_degree.groupby("pq"):
+            sub = sub.sort_values("n")
+
+            ax.plot(
+                sub["n"],
+                sub["cache_misses"],
+                marker="o",
+                linewidth=2,
+                label=str(pq),
+            )
+
+        ax.set_title("Cache misses for heap implementations")
+        ax.set_xlabel("Number of nodes")
+        ax.set_ylabel("Cache misses")
+        ax.legend(fontsize=8)
+
+        fig.tight_layout(rect=[0, 0, 1, 0.92])
+
+        save_plot(
+            f"priority_queues_heap_cache_misses_degree_{safe_filename(average_degree)}.png"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Coloring
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def plot_coloring() -> None:
+    df = read_csv("coloring.csv")
+    if df is None:
+        return
+
+    needed = ["n", "radius", "approach", "time_ms"]
+
+    if not has_columns(df, needed):
+        print("[skip] coloring.csv missing required columns")
+        print(f"       required: {needed}")
+        print(f"       found:    {list(df.columns)}")
+        return
+
+    value_cols = ["time_ms"]
+
+    if "matches_optimal" in df.columns:
+        value_cols.append("matches_optimal")
+
+    data = mean_by(
+        df,
+        ["n", "radius", "approach"],
+        value_cols,
+    )
+
+    data["time_ms"] = pd.to_numeric(data["time_ms"], errors="coerce")
+    data = data.dropna(subset=["time_ms"])
+
+    # Log scale cannot display zero or negative values.
+    # Replace zero values with a tiny positive floor if needed.
+    positive_times = data[data["time_ms"] > 0]["time_ms"]
+
+    if positive_times.empty:
+        print("[skip] coloring.csv has no positive time_ms values")
+        return
+
+    min_positive = positive_times.min()
+    data.loc[data["time_ms"] <= 0, "time_ms"] = min_positive / 10.0
+
+    fig = plt.figure(figsize=(14, 7), constrained_layout=True)
+    gs = fig.add_gridspec(2, 1, height_ratios=[5, 1.1])
+
+    ax_time = fig.add_subplot(gs[0])
+    ax_opt = fig.add_subplot(gs[1])
+
+    fig.suptitle("Graph Coloring: Runtime and Optimality", fontsize=15)
+
+    for key, sub in data.groupby(["radius", "approach"]):
+        sub = sub.sort_values("n")
+        radius, approach = key
+
+        ax_time.plot(
+            sub["n"],
+            sub["time_ms"],
+            marker="o",
+            linewidth=2,
+            label=f"radius={radius}, {approach}",
+        )
+
+    ax_time.set_yscale("log")
+    ax_time.set_title("Runtime, log scale")
+    ax_time.set_xlabel("Number of nodes")
+    ax_time.set_ylabel("Time (ms, log scale)")
+
+    ax_time.legend(fontsize=8)
+
+    if "matches_optimal" in data.columns:
+        optimal = data.copy()
+
+        optimal["matches_optimal"] = pd.to_numeric(
+            optimal["matches_optimal"],
+            errors="coerce",
+        )
+
+        opt_summary = (
+            optimal.groupby("approach")["matches_optimal"]
+            .mean()
+            .sort_index()
+        )
+
+        ax_opt.bar(
+            opt_summary.index.astype(str),
+            opt_summary.values,
+        )
+
+        ax_opt.set_ylim(0, 1.05)
+        ax_opt.set_ylabel("Optimal rate")
+        ax_opt.set_title("Optimal solution match rate")
+        ax_opt.set_xlabel("")
+
+        for i, value in enumerate(opt_summary.values):
+            if pd.notna(value):
+                ax_opt.text(
+                    i,
+                    min(value + 0.03, 1.03),
+                    f"{value:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+    else:
+        ax_opt.text(
+            0.5,
+            0.5,
+            "matches_optimal column not available",
+            ha="center",
+            va="center",
+        )
+        ax_opt.axis("off")
+
+    save_plot("coloring_time_and_optimality.png")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Interference graph
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_interference_ratios(data: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+
+    for radius, sub_radius in data.groupby("radius"):
+        brute = sub_radius[
+            sub_radius["approach"].astype(str).str.contains("brute", case=False)
+        ].copy()
+
+        quad = sub_radius[
+            sub_radius["approach"].astype(str).str.contains("quad", case=False)
+        ].copy()
+
+        if brute.empty or quad.empty:
+            continue
+
+        merged = brute.merge(
+            quad,
+            on=["n", "radius"],
+            suffixes=("_brute", "_quad"),
+        )
+
+        merged["speedup_time_brute_over_qt"] = (
+                merged["total_time_ms_brute"] / merged["total_time_ms_quad"]
+        )
+
+        merged["speedup_checks_brute_over_qt"] = (
+                merged["distance_checks_brute"] / merged["distance_checks_quad"]
+        )
+
+        merged = merged.replace([np.inf, -np.inf], np.nan)
+
+        merged = merged.dropna(
+            subset=[
+                "speedup_time_brute_over_qt",
+                "speedup_checks_brute_over_qt",
+            ]
+        )
+
+        rows.append(merged)
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.concat(rows, ignore_index=True)
+
+
+def find_quadtree_breakpoints(ratios: pd.DataFrame) -> pd.DataFrame:
+    """
+    Finds the first point where quadtree becomes worse than brute force.
+
+    Ratios are:
+        brute force / quadtree
+
+    Therefore:
+        > 1.0 means quadtree is better
+        < 1.0 means brute force is better
+    """
+    if ratios.empty:
+        return pd.DataFrame()
+
+    rows = []
+
+    for radius, sub in ratios.groupby("radius"):
+        worse = sub[sub["speedup_time_brute_over_qt"] < 1.0].copy()
+
+        if not worse.empty:
+            rows.append(worse.sort_values("n").iloc[0])
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
 
 
 def plot_interference_graph() -> None:
@@ -210,272 +601,95 @@ def plot_interference_graph() -> None:
     if df is None:
         return
 
-    fig, axes = plt.subplots(2, 2, figsize=(15, 9))
-    fig.suptitle("Interference Graph: Brute Force vs Quadtree", fontsize=15)
+    required = ["n", "radius", "approach", "total_time_ms", "distance_checks"]
 
-    metrics = [
-        ("total_time_ms", "Time (ms)", "Total runtime"),
-        ("rss_delta_bytes", "RSS delta (bytes)", "Memory delta"),
-        ("distance_checks", "Distance checks", "Distance checks"),
-        ("matches_reference", "Fraction matching reference", "Correctness"),
-    ]
-
-    for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-        plot_grouped_lines(
-            ax,
-            df,
-            x="n",
-            y=metric,
-            group_cols=["n", "radius", "approach"],
-            label_cols=["radius", "approach"],
-            xlabel="Number of nodes",
-            ylabel=ylabel,
-            title=title,
-        )
-
-    save_plot("interference_summary.png")
-
-    fig, axes = plt.subplots(2, 2, figsize=(15, 9))
-    fig.suptitle("Interference Graph Search Statistics", fontsize=15)
-
-    metrics = [
-        ("nodes_visited", "Nodes visited", "Nodes visited"),
-        ("nodes_pruned", "Nodes pruned", "Nodes pruned"),
-        ("box_checks", "Box checks", "Box checks"),
-        ("checks_per_second", "Checks / second", "Checks per second"),
-    ]
-
-    for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-        plot_grouped_lines(
-            ax,
-            df,
-            x="n",
-            y=metric,
-            group_cols=["n", "radius", "approach"],
-            label_cols=["radius", "approach"],
-            xlabel="Number of nodes",
-            ylabel=ylabel,
-            title=title,
-        )
-
-    save_plot("interference_stats.png")
-
-    qt = df[df["approach"] == "quadtree"].copy() if "approach" in df.columns else pd.DataFrame()
-    if not qt.empty:
-        fig, axes = plt.subplots(1, 3, figsize=(17, 5))
-        fig.suptitle("Quadtree Breakdown", fontsize=15)
-
-        metrics = [
-            ("build_time_ms", "Build time (ms)", "Build time"),
-            ("run_time_ms", "Query/run time (ms)", "Query/run time"),
-            ("estimated_structure_bytes", "Estimated bytes", "Estimated structure size"),
-        ]
-
-        for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-            plot_grouped_lines(
-                ax,
-                qt,
-                x="n",
-                y=metric,
-                group_cols=["n", "radius"],
-                label_cols=["radius"],
-                xlabel="Number of nodes",
-                ylabel=ylabel,
-                title=title,
-            )
-
-        save_plot("quadtree_breakdown.png")
-
-    if has_cache_data(df):
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-        fig.suptitle("Interference Graph Cache Metrics", fontsize=15)
-
-        for ax, metric, ylabel in [
-            (axes[0], "cache_misses", "Cache misses"),
-            (axes[1], "cache_references", "Cache references"),
-        ]:
-            plot_grouped_lines(
-                ax,
-                df,
-                x="n",
-                y=metric,
-                group_cols=["n", "radius", "approach"],
-                label_cols=["radius", "approach"],
-                xlabel="Number of nodes",
-                ylabel=ylabel,
-                title=ylabel,
-            )
-
-        save_plot("interference_cache.png")
-
-
-def plot_coloring() -> None:
-    df = read_csv("coloring.csv")
-    if df is None:
+    if not has_columns(df, required):
+        print("[skip] interference_graph.csv missing required columns")
+        print(f"       required: {required}")
+        print(f"       found:    {list(df.columns)}")
         return
 
-    fig, axes = plt.subplots(2, 2, figsize=(15, 9))
-    fig.suptitle("Graph Coloring: Brute Force vs Heuristic", fontsize=15)
+    data = mean_by(
+        df,
+        ["n", "radius", "approach"],
+        ["total_time_ms", "distance_checks"],
+    )
 
-    metrics = [
-        ("time_ms", "Time (ms)", "Runtime"),
-        ("colors_used", "Colors used", "Colors used"),
-        ("matches_optimal", "Fraction matching optimal", "Optimal match rate"),
-        ("valid", "Fraction valid", "Validity rate"),
-    ]
+    ratios = build_interference_ratios(data)
 
-    for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-        plot_grouped_lines(
-            ax,
-            df,
-            x="n",
-            y=metric,
-            group_cols=["n", "radius", "approach"],
-            label_cols=["radius", "approach"],
-            xlabel="Number of nodes",
-            ylabel=ylabel,
-            title=title,
-        )
-
-    save_plot("coloring_summary.png")
-
-    if has_cache_data(df):
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-        fig.suptitle("Coloring Cache Metrics", fontsize=15)
-
-        for ax, metric, ylabel in [
-            (axes[0], "cache_misses", "Cache misses"),
-            (axes[1], "cache_references", "Cache references"),
-        ]:
-            plot_grouped_lines(
-                ax,
-                df,
-                x="n",
-                y=metric,
-                group_cols=["n", "radius", "approach"],
-                label_cols=["radius", "approach"],
-                xlabel="Number of nodes",
-                ylabel=ylabel,
-                title=ylabel,
-            )
-
-        save_plot("coloring_cache.png")
-
-
-def plot_shortest_path() -> None:
-    df = read_csv("shortest_path.csv")
-    if df is None:
+    if ratios.empty:
+        print("[skip] could not build brute force/quadtree interference ratios")
         return
 
-    fig, axes = plt.subplots(1, 3, figsize=(17, 5))
-    fig.suptitle("Shortest Path: Dijkstra vs A* with Fibonacci Heap", fontsize=15)
+    breakpoints = find_quadtree_breakpoints(ratios)
 
-    metrics = [
-        ("time_ms", "Time (ms)", "Runtime"),
-        ("rss_delta_bytes", "RSS delta (bytes)", "Memory delta"),
-        ("matches_reference", "Fraction matching reference", "Correctness"),
-    ]
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6), sharex=True)
+    fig.suptitle("Interference Graph: Brute Force / Quadtree Ratios", fontsize=15)
 
-    for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-        plot_grouped_lines(
-            ax,
-            df,
-            x="n",
-            y=metric,
-            group_cols=["n", "connectivity", "algorithm"],
-            label_cols=["connectivity", "algorithm"],
-            xlabel="Number of vertices",
-            ylabel=ylabel,
-            title=title,
+    ax_time = axes[0]
+    ax_checks = axes[1]
+
+    for radius, sub in ratios.groupby("radius"):
+        sub = sub.sort_values("n")
+
+        ax_time.plot(
+            sub["n"],
+            sub["speedup_time_brute_over_qt"],
+            marker="o",
+            linewidth=2,
+            label=f"radius={radius}",
         )
 
-    save_plot("shortest_path_summary.png")
-
-    if has_cache_data(df):
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-        fig.suptitle("Shortest Path Cache Metrics", fontsize=15)
-
-        for ax, metric, ylabel in [
-            (axes[0], "cache_misses", "Cache misses"),
-            (axes[1], "cache_references", "Cache references"),
-        ]:
-            plot_grouped_lines(
-                ax,
-                df,
-                x="n",
-                y=metric,
-                group_cols=["n", "connectivity", "algorithm"],
-                label_cols=["connectivity", "algorithm"],
-                xlabel="Number of vertices",
-                ylabel=ylabel,
-                title=ylabel,
-            )
-
-        save_plot("shortest_path_cache.png")
-
-
-def plot_prim() -> None:
-    df = read_csv("prim.csv")
-    if df is None:
-        return
-
-    fig, axes = plt.subplots(2, 2, figsize=(15, 9))
-    fig.suptitle("Prim: Fibonacci Heap vs Mutable Binary Heap", fontsize=15)
-
-    metrics = [
-        ("time_ms", "Time (ms)", "Runtime"),
-        ("rss_delta_bytes", "RSS delta (bytes)", "Memory delta"),
-        ("selected_edges", "Selected edges", "Selected edges"),
-        ("matches_reference", "Fraction matching reference", "Correctness"),
-    ]
-
-    for ax, (metric, ylabel, title) in zip(axes.flat, metrics):
-        plot_grouped_lines(
-            ax,
-            df,
-            x="n",
-            y=metric,
-            group_cols=["n", "connectivity", "pq"],
-            label_cols=["connectivity", "pq"],
-            xlabel="Number of vertices",
-            ylabel=ylabel,
-            title=title,
+        ax_checks.plot(
+            sub["n"],
+            sub["speedup_checks_brute_over_qt"],
+            marker="o",
+            linewidth=2,
+            label=f"radius={radius}",
         )
 
-    save_plot("prim_summary.png")
+    for ax in axes:
+        ax.axhline(
+            1.0,
+            color="black",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.8,
+        )
+        ax.set_xlabel("Number of nodes")
+        ax.legend(fontsize=8)
 
-    if has_cache_data(df):
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-        fig.suptitle("Prim Cache Metrics", fontsize=15)
+    ax_time.set_title("Runtime speedup")
+    ax_time.set_ylabel("Brute force time / quadtree time")
 
-        for ax, metric, ylabel in [
-            (axes[0], "cache_misses", "Cache misses"),
-            (axes[1], "cache_references", "Cache references"),
-        ]:
-            plot_grouped_lines(
-                ax,
-                df,
-                x="n",
-                y=metric,
-                group_cols=["n", "connectivity", "pq"],
-                label_cols=["connectivity", "pq"],
-                xlabel="Number of vertices",
-                ylabel=ylabel,
-                title=ylabel,
+    ax_checks.set_title("Distance-check reduction")
+    ax_checks.set_ylabel("Brute force checks / quadtree checks")
+
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    save_plot("interference_bruteforce_over_quadtree_ratios.png")
+
+    if not breakpoints.empty:
+        print("\nInterference graph breakpoints:")
+
+        for _, row in breakpoints.iterrows():
+            print(
+                f"  radius={row['radius']}: quadtree first slower at "
+                f"n={int(row['n'])} "
+                f"(time speedup={row['speedup_time_brute_over_qt']:.2f}, "
+                f"check speedup={row['speedup_checks_brute_over_qt']:.2f})"
             )
-
-        save_plot("prim_cache.png")
+    else:
+        print("[info] No point found where quadtree is slower than brute force.")
 
 
 def main() -> None:
     setup_style()
     ensure_dirs()
 
-    plot_priority_queues()
-    plot_interference_graph()
-    plot_coloring()
     plot_shortest_path()
-    plot_prim()
+    plot_priority_queues()
+    plot_coloring()
+    plot_interference_graph()
 
     print(f"\nPlots written to: {PLOTS_DIR.resolve()}")
 

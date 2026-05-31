@@ -31,7 +31,7 @@ public:
 
     struct InterferenceGraphConfig {
         std::vector<std::size_t> nodeCounts = {1000, 2500, 5000, 10000, 20000};
-        std::vector<double> radii = {250.0, 500.0, 1000.0, 2000.0};
+        std::vector<double> radii = {1000.0, 2000.0, 5000.0, 10000.0};
         double coordinateMax = 100000.0;
         unsigned repetitions = 3;
         unsigned warmupRuns = 0;
@@ -77,8 +77,8 @@ public:
         PrimConfig prim{};
 
         bool runPriorityQueues = false;
-        bool runInterferenceGraph = false;
-        bool runColoring = true;
+        bool runInterferenceGraph = true;
+        bool runColoring = false;
         bool runShortestPath = false;
         bool runPrim = false;
     };
