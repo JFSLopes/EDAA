@@ -28,7 +28,7 @@ public:
     //   "interference_radius": 700.0,
     //   "antennas": [{"id":"ap_1", "x":..., "y":...}, ...]
     // }
-    void loadFromJson(const std::string& filepath);
+    size_t loadFromJson(const std::string& filepath);
 
     // Exact solver. Tries k = 1, 2, ... until a valid coloring is found.
     // Best for small instances.
@@ -59,7 +59,7 @@ private:
     std::vector<std::vector<int>> adj;
     Multigraph conflictGraph;
 
-    void buildConflictGraph();
+    size_t buildConflictGraph();
     bool canUseColor(int antennaIndex, int color, const std::vector<int>& colors) const;
     bool bruteForceRec(int idx,
                        int maxColors,

@@ -1,16 +1,12 @@
 #include "header/Benchmark.h"
-#include "header/BenchmarkHardware.h"
 
 int main() {
-    //App app;
-    //app.run();
-    BenchmarkConfig cfg;
+    Benchmark::Config cfg;
 
-    Benchmark bench(cfg);
-    //bench.runDijkstraVsAstar();
-    //bench.runAll();
+    cfg.outputDirectory = "../benchmark";
 
-    BenchmarkHardware benchmarkHardware(bench);
-    benchmarkHardware.runAll();
+    Benchmark benchmark(cfg);
+    benchmark.run();
+
     return 0;
 }

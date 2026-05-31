@@ -17,5 +17,6 @@ add_executable(EDAA main.cpp
         source/Quadtree.cpp
         source/Coloring.cpp
         source/Benchmark.cpp
-        source/BenchmarkHardware.cpp
 )
+
+target_compile_definitions(EDAA PRIVATE ENABLE_BENCHMARK_CACHE)

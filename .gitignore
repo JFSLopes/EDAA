@@ -5,5 +5,7 @@ porto_walk.graphml
 .DS_Store
 *.csv
 *.png
+*.json
+*.gif
 venv
 build
