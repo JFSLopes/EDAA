@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <unordered_set>
 #include <random>
 #include <set>
 #include <string>
@@ -77,7 +78,7 @@ public:
         PrimConfig prim{};
 
         bool runPriorityQueues = false;
-        bool runInterferenceGraph = true;
+        bool runInterferenceGraph = false;
         bool runColoring = false;
         bool runShortestPath = false;
         bool runPrim = false;
@@ -87,6 +88,7 @@ public:
     explicit Benchmark(Config config);
 
     void run();
+    void runPortoExplorationBenchmark();
     void runPriorityQueueBenchmarks();
     void runInterferenceGraphBenchmarks();
     void runColoringBenchmarks();
@@ -94,6 +96,8 @@ public:
     void runPrimBenchmarks();
 
 private:
+    static std::unordered_set<u_int> pathVertexIds(const Multigraph& graph, u_int srcId, u_int dstId);
+
     struct Measurement {
         double milliseconds = 0.0;
         long long cacheMisses = -1;
@@ -110,12 +114,14 @@ private:
 
     Config cfg;
 
+    static std::vector<u_int> orderedPathVertexIds(const Multigraph& graph, u_int srcId, u_int dstId);
     static std::string pqName(PriorityQueueSelected pqs);
     static std::string csvEscape(const std::string& s);
     static void ensureDirectory(const std::string& path);
     static void appendLine(const std::string& path, const std::string& header, const std::string& line);
     static Measurement measure(const std::function<void()>& fn, bool collectCacheMisses);
     static std::size_t currentRSSBytes();
+    static std::size_t reachedVertexCount(const Multigraph& graph);
 
     static Multigraph generateGraph(std::size_t n, unsigned averageDegree, std::uint32_t seed);
     static std::vector<Point> generatePoints(std::size_t n, double coordinateMax, std::uint32_t seed);

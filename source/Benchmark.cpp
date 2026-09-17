@@ -1,4 +1,5 @@
 #include "../header/Benchmark.h"
+#include "../header/FileParser.h"
 
 #include <algorithm>
 #include <chrono>
@@ -27,17 +28,259 @@
 #include <unistd.h>
 #endif
 
+std::unordered_set<u_int> Benchmark::pathVertexIds(const Multigraph& graph, u_int srcId, u_int dstId) {
+    std::unordered_set<u_int> ids;
+
+    auto current = graph.getVertex(dstId);
+    auto src = graph.getVertex(srcId);
+
+    if (!current || !src) {
+        return ids;
+    }
+
+    ids.insert(dstId);
+
+    while (current && current != src) {
+        auto path = current->getPath();
+
+        if (!path) {
+            break;
+        }
+
+        auto origin = path->getOrigin();
+
+        if (!origin) {
+            break;
+        }
+
+        ids.insert(origin->getId());
+        current = origin;
+    }
+
+    return ids;
+}
+
 Benchmark::Benchmark() : cfg(Config{}) {}
 
 Benchmark::Benchmark(Config config) : cfg(std::move(config)) {}
 
+std::size_t Benchmark::reachedVertexCount(const Multigraph& graph) {
+    std::size_t count = 0;
+
+    for (const auto& v : graph.getVertexSet()) {
+        if (v && v->getDist() != DBL_MAX) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
 void Benchmark::run() {
     ensureDirectory(cfg.outputDirectory);
+
+    runPortoExplorationBenchmark();
+
     if (cfg.runPriorityQueues) runPriorityQueueBenchmarks();
     if (cfg.runInterferenceGraph) runInterferenceGraphBenchmarks();
     if (cfg.runColoring) runColoringBenchmarks();
     if (cfg.runShortestPath) runShortestPathBenchmarks();
     if (cfg.runPrim) runPrimBenchmarks();
+}
+
+void Benchmark::runPortoExplorationBenchmark() {
+    ensureDirectory(cfg.outputDirectory);
+
+    const std::string nodesPath = "../graph/nodes_clipped.csv";
+    const std::string edgesPath = "../graph/edges_clipped.csv";
+
+    const std::string verticesFile = cfg.outputDirectory + "/porto_exploration_vertices.csv";
+    const std::string summaryFile = cfg.outputDirectory + "/porto_exploration_summary.csv";
+
+    const u_int srcId = 0;
+    const u_int dstId = 7000;
+
+    const std::string verticesHeader =
+            "algorithm,vertex_id,x,y,dist,reached,processed,on_path,path_order";
+
+    const std::string summaryHeader =
+            "algorithm,src,dst,total_vertices,reached_vertices,processed_vertices,path_vertices,"
+            "dest_dist,path_checksum,time_ms";
+
+    std::cout << "Running Porto exploration benchmark\n";
+    std::cout << "  nodes: " << nodesPath << "\n";
+    std::cout << "  edges: " << edgesPath << "\n";
+    std::cout << "  source: " << srcId << "\n";
+    std::cout << "  destination: " << dstId << "\n";
+
+    /*
+     * Overwrite previous files so each run creates a clean visualization dataset.
+     */
+    {
+        std::ofstream out(verticesFile);
+        if (!out.is_open()) {
+            throw std::runtime_error("Benchmark: cannot write " + verticesFile);
+        }
+        out << verticesHeader << '\n';
+    }
+
+    {
+        std::ofstream out(summaryFile);
+        if (!out.is_open()) {
+            throw std::runtime_error("Benchmark: cannot write " + summaryFile);
+        }
+        out << summaryHeader << '\n';
+    }
+
+    const std::vector<std::string> algorithms = {
+            "dijkstra_fibonacci",
+            "astar_fibonacci"
+    };
+
+    for (const std::string& alg : algorithms) {
+        std::cout << "  Loading graph for " << alg << "\n";
+
+        Multigraph g;
+        FileParser parser(nodesPath, edgesPath);
+
+        auto loadStart = std::chrono::steady_clock::now();
+        parser.parse(g);
+        auto loadEnd = std::chrono::steady_clock::now();
+
+        const double loadMs = std::chrono::duration<double, std::milli>(loadEnd - loadStart).count();
+
+        std::cout << "    Loaded " << g.getVertexSet().size()
+                  << " vertices in " << std::fixed << std::setprecision(3)
+                  << loadMs << " ms\n";
+
+        auto src = g.getVertex(srcId);
+        auto dst = g.getVertex(dstId);
+
+        if (!src || !dst) {
+            throw std::runtime_error("Benchmark: source or destination vertex does not exist");
+        }
+
+        std::cout << "    Running " << alg << "\n";
+
+        Measurement m = measure([&] {
+            if (alg == "dijkstra_fibonacci") {
+                g.dijkstra(src, dst, FIBONACCI_HEAP);
+            } else {
+                g.astar(src, dst, FIBONACCI_HEAP);
+            }
+        }, false);
+
+        const double dist = pathCostOrDist(g, dstId);
+        const std::uint64_t checksum = checksumPath(g);
+        const auto orderedPath = orderedPathVertexIds(g, srcId, dstId);
+
+        std::unordered_set<u_int> pathIds;
+        std::unordered_map<u_int, std::size_t> pathOrder;
+
+        for (std::size_t i = 0; i < orderedPath.size(); ++i) {
+            pathIds.insert(orderedPath[i]);
+            pathOrder[orderedPath[i]] = i;
+        }
+
+        std::size_t reachedCount = 0;
+        std::size_t processedCount = 0;
+
+        /*
+         * Append one row per vertex. This is the file the Python script can use
+         * to draw the Porto map and color what each algorithm reached.
+         */
+        std::ofstream verticesOut(verticesFile, std::ios::app);
+        if (!verticesOut.is_open()) {
+            throw std::runtime_error("Benchmark: cannot append to " + verticesFile);
+        }
+
+        for (const auto& v : g.getVertexSet()) {
+            if (!v) {
+                continue;
+            }
+
+            const double vDist = v->getDist();
+            const bool reached = vDist != DBL_MAX;
+
+            /*
+             * In the current implementation, the destination is checked before
+             * setVisited(true), so we manually count it as processed when reached.
+             */
+            const bool processed = v->isVisited() || (v->getId() == dstId && reached);
+
+            const bool onPath = pathIds.find(v->getId()) != pathIds.end();
+
+            if (reached) {
+                ++reachedCount;
+            }
+
+            if (processed) {
+                ++processedCount;
+            }
+
+            /*
+             * Adjust getX()/getY() if your Coordinates class uses different names.
+             */
+            const auto coords = v->getCoordinates();
+
+            verticesOut << alg << ','
+                        << v->getId() << ','
+                        << std::fixed << std::setprecision(8)
+                        << coords.getX() << ','
+                        << coords.getY() << ',';
+
+            if (reached) {
+                verticesOut << std::setprecision(12) << vDist;
+            } else {
+                verticesOut << "INF";
+            }
+
+            verticesOut << ','
+                        << (reached ? 1 : 0) << ','
+                        << (processed ? 1 : 0) << ','
+                        << (onPath ? 1 : 0) << ',';
+
+            if (onPath) {
+                verticesOut << pathOrder[v->getId()];
+            } else {
+                verticesOut << -1;
+            }
+
+            verticesOut << '\n';
+        }
+
+        verticesOut.flush();
+
+        std::ofstream summaryOut(summaryFile, std::ios::app);
+        if (!summaryOut.is_open()) {
+            throw std::runtime_error("Benchmark: cannot append to " + summaryFile);
+        }
+
+        summaryOut << alg << ','
+                   << srcId << ','
+                   << dstId << ','
+                   << g.getVertexSet().size() << ','
+                   << reachedCount << ','
+                   << processedCount << ','
+                   << orderedPath.size() << ','
+                   << std::fixed << std::setprecision(12) << dist << ','
+                   << checksum << ','
+                   << std::setprecision(6) << m.milliseconds
+                   << '\n';
+
+        summaryOut.flush();
+
+        std::cout << "    Done " << alg << "\n";
+        std::cout << "      time: " << m.milliseconds << " ms\n";
+        std::cout << "      reached vertices: " << reachedCount << "\n";
+        std::cout << "      processed vertices: " << processedCount << "\n";
+        std::cout << "      path vertices: " << orderedPath.size() << "\n";
+        std::cout << "      destination distance: " << dist << "\n";
+    }
+
+    std::cout << "  Wrote:\n";
+    std::cout << "    " << verticesFile << "\n";
+    std::cout << "    " << summaryFile << "\n";
 }
 
 void Benchmark::runPriorityQueueBenchmarks() {
@@ -286,7 +529,7 @@ void Benchmark::runShortestPathBenchmarks() {
     const std::string file = cfg.outputDirectory + "/shortest_path.csv";
     const std::string header =
             "seed,repetition,n,average_degree,algorithm,time_ms,cache_misses,cache_references,rss_before_bytes,rss_after_bytes,"
-            "rss_delta_bytes,dest_dist,path_checksum,matches_reference";
+            "rss_delta_bytes,dest_dist,path_checksum,reached_vertices,matches_reference";
 
     std::cout << "Running Shortest Path Benchmarks\n";
 
@@ -314,6 +557,8 @@ void Benchmark::runShortestPathBenchmarks() {
                     }, cfg.shortestPath.cache.enabled);
                     const double dist = pathCostOrDist(g, n - 1);
                     const std::uint64_t checksum = checksumPath(g);
+                    const std::size_t reached = reachedVertexCount(g);
+
                     bool matches = true;
                     if (alg == "dijkstra_fibonacci") { refDist = dist; refChecksum = checksum; }
                     else { matches = std::abs(dist - refDist) <= 1e-7 && checksum == refChecksum; }
@@ -328,7 +573,7 @@ void Benchmark::runShortestPathBenchmarks() {
                          << m.cacheMisses << ',' << m.cacheReferences << ','
                          << m.rssBeforeBytes << ',' << m.rssAfterBytes << ','
                          << static_cast<long long>(m.rssAfterBytes) - static_cast<long long>(m.rssBeforeBytes) << ','
-                         << std::setprecision(12) << dist << ',' << checksum << ',' << matches;
+                         << std::setprecision(12) << dist << ',' << checksum << ',' << reached << ',' << matches;
                     appendLine(file, header, line.str());
                 }
             }
@@ -692,4 +937,41 @@ std::uint64_t Benchmark::edgeChecksum(const std::vector<std::pair<std::size_t, s
         h *= 1099511628211ULL;
     }
     return h;
+}
+
+std::vector<u_int> Benchmark::orderedPathVertexIds(const Multigraph& graph, u_int srcId, u_int dstId) {
+    std::vector<u_int> ids;
+
+    auto current = graph.getVertex(dstId);
+    auto src = graph.getVertex(srcId);
+
+    if (!current || !src) {
+        return ids;
+    }
+
+    // Walk backwards: dst -> ... -> src
+    while (current) {
+        ids.push_back(current->getId());
+
+        if (current == src) {
+            break;
+        }
+
+        auto path = current->getPath();
+        if (!path || !path->getOrigin()) {
+            break;
+        }
+
+        current = path->getOrigin();
+    }
+
+    // Convert to src -> ... -> dst
+    std::reverse(ids.begin(), ids.end());
+
+    // If the path did not reach the source, return empty path.
+    if (ids.empty() || ids.front() != srcId || ids.back() != dstId) {
+        return {};
+    }
+
+    return ids;
 }

@@ -169,10 +169,15 @@ def plot_shortest_path() -> None:
         print(f"       found:    {list(df.columns)}")
         return
 
+    value_cols = ["time_ms"]
+
+    if "reached_vertices" in df.columns:
+        value_cols.append("reached_vertices")
+
     data = mean_by(
         df,
         ["n", "average_degree", "algorithm"],
-        ["time_ms"],
+        value_cols,
     )
 
     dijkstra_name = find_col_value(data, "algorithm", ["dijkstra"])
@@ -196,19 +201,78 @@ def plot_shortest_path() -> None:
         print("[skip] no matching Dijkstra/A* rows for same n and average_degree")
         return
 
+    # ------------------------------------------------------------
+    # Plot 1: A* speedup over Dijkstra
+    # ------------------------------------------------------------
+
     merged["speedup"] = merged["time_ms_dijkstra"] / merged["time_ms_astar"]
     merged = merged.replace([np.inf, -np.inf], np.nan)
-    merged = merged.dropna(subset=["speedup"])
+    speedup_data = merged.dropna(subset=["speedup"])
+
+    if not speedup_data.empty:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        fig.suptitle("Shortest Path: A* Speedup over Dijkstra", fontsize=15)
+
+        for average_degree, sub in speedup_data.groupby("average_degree"):
+            sub = sub.sort_values("n")
+
+            ax.plot(
+                sub["n"],
+                sub["speedup"],
+                marker="o",
+                linewidth=2,
+                label=f"average degree = {average_degree}",
+            )
+
+        ax.axhline(
+            1.0,
+            color="black",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.8,
+            label="baseline: same speed",
+        )
+
+        ax.set_title("Speedup = Dijkstra time / A* time")
+        ax.set_xlabel("Number of nodes")
+        ax.set_ylabel("A* speedup over Dijkstra")
+
+        ax.legend(fontsize=8)
+        fig.tight_layout(rect=[0, 0, 1, 0.92])
+        save_plot("shortest_path_astar_speedup.png")
+
+    # ------------------------------------------------------------
+    # Plot 2: reached vertices reduction
+    # ------------------------------------------------------------
+
+    if "reached_vertices_dijkstra" not in merged.columns or "reached_vertices_astar" not in merged.columns:
+        print("[skip] shortest_path.csv has no reached_vertices column")
+        return
+
+    merged["reached_ratio"] = (
+            merged["reached_vertices_dijkstra"] / merged["reached_vertices_astar"]
+    )
+
+    merged["reached_reduction_percent"] = (
+            100.0 * (1.0 - merged["reached_vertices_astar"] / merged["reached_vertices_dijkstra"])
+    )
+
+    merged = merged.replace([np.inf, -np.inf], np.nan)
+    reached_data = merged.dropna(subset=["reached_ratio"])
+
+    if reached_data.empty:
+        print("[skip] no valid reached_vertices ratios")
+        return
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    fig.suptitle("Shortest Path: A* Speedup over Dijkstra", fontsize=15)
+    fig.suptitle("Shortest Path: Search Space Reduction with A*", fontsize=15)
 
-    for average_degree, sub in merged.groupby("average_degree"):
+    for average_degree, sub in reached_data.groupby("average_degree"):
         sub = sub.sort_values("n")
 
         ax.plot(
             sub["n"],
-            sub["speedup"],
+            sub["reached_ratio"],
             marker="o",
             linewidth=2,
             label=f"average degree = {average_degree}",
@@ -220,16 +284,47 @@ def plot_shortest_path() -> None:
         linestyle="--",
         linewidth=1.2,
         alpha=0.8,
-        label="baseline: same speed",
+        label="baseline: same reached vertices",
     )
 
-    ax.set_title("Speedup = Dijkstra time / A* time")
+    ax.set_title("Reached vertices ratio = Dijkstra reached / A* reached")
     ax.set_xlabel("Number of nodes")
-    ax.set_ylabel("A* speedup over Dijkstra")
+    ax.set_ylabel("How many times more vertices Dijkstra reached")
 
     ax.legend(fontsize=8)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
-    save_plot("shortest_path_astar_speedup.png")
+    save_plot("shortest_path_reached_vertices_ratio.png")
+
+    # Optional extra plot: percentage reduction
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.suptitle("Shortest Path: A* Reached Vertices Reduction", fontsize=15)
+
+    for average_degree, sub in reached_data.groupby("average_degree"):
+        sub = sub.sort_values("n")
+
+        ax.plot(
+            sub["n"],
+            sub["reached_reduction_percent"],
+            marker="o",
+            linewidth=2,
+            label=f"average degree = {average_degree}",
+        )
+
+    ax.axhline(
+        0.0,
+        color="black",
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.8,
+    )
+
+    ax.set_title("Percentage reduction in reached vertices")
+    ax.set_xlabel("Number of nodes")
+    ax.set_ylabel("Vertices reached reduction using A* (%)")
+
+    ax.legend(fontsize=8)
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    save_plot("shortest_path_reached_vertices_reduction_percent.png")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -249,50 +344,105 @@ def plot_priority_queues() -> None:
         print(f"       found:    {list(df.columns)}")
         return
 
+    df = df.copy()
+    df["n"] = pd.to_numeric(df["n"], errors="coerce")
+    df["average_degree"] = pd.to_numeric(df["average_degree"], errors="coerce")
+    df["time_ms"] = pd.to_numeric(df["time_ms"], errors="coerce")
+    df = df.dropna(subset=["n", "average_degree", "time_ms", "pq"])
+
+    def is_binary_name(name: object) -> bool:
+        s = str(name).lower()
+        return "binary" in s or "mutable" in s
+
+    def is_fibonacci_name(name: object) -> bool:
+        s = str(name).lower()
+        return "fib" in s or "fibonacci" in s
+
+    def short_pq_name(name: object) -> str:
+        s = str(name).lower()
+        if is_brute_force_name(s):
+            return "Brute force"
+        if is_binary_name(s):
+            return "Binary heap"
+        if is_fibonacci_name(s):
+            return "Fibonacci heap"
+        return str(name)
+
+    df["pq_short"] = df["pq"].apply(short_pq_name)
+    df["is_brute_force"] = df["pq"].apply(is_brute_force_name)
+    df["is_binary"] = df["pq"].apply(is_binary_name)
+    df["is_fibonacci"] = df["pq"].apply(is_fibonacci_name)
+
+    # ------------------------------------------------------------
+    # 1. Heap runtime facets: binary vs Fibonacci for all degrees
+    # ------------------------------------------------------------
+
+    heap = df[df["is_binary"] | df["is_fibonacci"]].copy()
+
+    if not heap.empty:
+        heap_runtime = mean_by(
+            heap,
+            ["n", "average_degree", "pq_short"],
+            ["time_ms"],
+        )
+
+        degrees = sorted(heap_runtime["average_degree"].dropna().unique())
+
+        if degrees:
+            cols = min(2, len(degrees))
+            rows = int(np.ceil(len(degrees) / cols))
+
+            fig, axes = plt.subplots(
+                rows,
+                cols,
+                figsize=(7 * cols, 4.8 * rows),
+                squeeze=False,
+            )
+
+            fig.suptitle(
+                "Priority Queue Runtime: Binary Heap vs Fibonacci Heap",
+                fontsize=16,
+            )
+
+            for idx, degree in enumerate(degrees):
+                ax = axes[idx // cols][idx % cols]
+                sub_degree = heap_runtime[heap_runtime["average_degree"] == degree]
+
+                for pq, sub in sub_degree.groupby("pq_short"):
+                    sub = sub.sort_values("n")
+
+                    ax.plot(
+                        sub["n"],
+                        sub["time_ms"],
+                        marker="o",
+                        linewidth=2,
+                        label=str(pq),
+                    )
+
+                ax.set_title(f"Average degree = {degree:g}")
+                ax.set_xlabel("Number of vertices")
+                ax.set_ylabel("Runtime (ms)")
+                ax.grid(True, alpha=0.25)
+                ax.legend(fontsize=8)
+
+            for idx in range(len(degrees), rows * cols):
+                axes[idx // cols][idx % cols].axis("off")
+
+            fig.tight_layout(rect=[0, 0, 1, 0.94])
+            save_plot("priority_queues_heap_runtime_facets.png")
+
+    # ------------------------------------------------------------
+    # 2. Brute-force slowdown compared with best heap
+    # ------------------------------------------------------------
+
     data = mean_by(
         df,
-        ["n", "average_degree", "pq"],
+        ["n", "average_degree", "pq_short"],
         ["time_ms"],
     )
 
-    data["is_brute_force"] = data["pq"].apply(is_brute_force_name)
-
-    heap_data = data[~data["is_brute_force"]].copy()
-    brute_data = data[data["is_brute_force"]].copy()
-
-    if heap_data.empty:
-        print("[warn] No non-brute-force priority queues found; plotting all PQs.")
-        heap_data = data.copy()
-
-    for average_degree, sub_degree in heap_data.groupby("average_degree"):
-        fig, ax = plt.subplots(figsize=(11, 6))
-
-        fig.suptitle(
-            f"Priority Queue Runtime — Average Degree {average_degree}",
-            fontsize=15,
-        )
-
-        for pq, sub in sub_degree.groupby("pq"):
-            sub = sub.sort_values("n")
-
-            ax.plot(
-                sub["n"],
-                sub["time_ms"],
-                marker="o",
-                linewidth=2,
-                label=str(pq),
-            )
-
-        ax.set_title("Heap implementations only")
-        ax.set_xlabel("Number of nodes")
-        ax.set_ylabel("Time (ms)")
-
-        ax.legend(fontsize=8)
-        fig.tight_layout(rect=[0, 0, 1, 0.92])
-
-        save_plot(
-            f"priority_queues_heap_time_degree_{safe_filename(average_degree)}.png"
-        )
+    brute_data = data[data["pq_short"] == "Brute force"].copy()
+    heap_data = data[data["pq_short"].isin(["Binary heap", "Fibonacci heap"])].copy()
 
     if not brute_data.empty and not heap_data.empty:
         best_heap = (
@@ -308,7 +458,6 @@ def plot_priority_queues() -> None:
         )
 
         slowdown = brute_avg.merge(best_heap, on=["n", "average_degree"])
-
         slowdown["brute_force_slowdown"] = (
                 slowdown["brute_force_time_ms"] / slowdown["best_heap_time_ms"]
         )
@@ -318,7 +467,7 @@ def plot_priority_queues() -> None:
 
         if not slowdown.empty:
             fig, ax = plt.subplots(figsize=(11, 6))
-            fig.suptitle("Priority Queue Brute-Force Slowdown", fontsize=15)
+            fig.suptitle("Priority Queue: Brute-Force Slowdown", fontsize=15)
 
             for average_degree, sub in slowdown.groupby("average_degree"):
                 sub = sub.sort_values("n")
@@ -328,7 +477,7 @@ def plot_priority_queues() -> None:
                     sub["brute_force_slowdown"],
                     marker="o",
                     linewidth=2,
-                    label=f"average degree = {average_degree}",
+                    label=f"average degree = {average_degree:g}",
                 )
 
             ax.axhline(
@@ -337,69 +486,207 @@ def plot_priority_queues() -> None:
                 linestyle="--",
                 linewidth=1.2,
                 alpha=0.8,
+                label="same runtime",
             )
 
-            ax.set_title("Brute force time / best heap time")
-            ax.set_xlabel("Number of nodes")
-            ax.set_ylabel("Slowdown factor")
-
+            ax.set_title("Slowdown = brute-force time / fastest heap time")
+            ax.set_xlabel("Number of vertices")
+            ax.set_ylabel("Brute-force slowdown factor")
+            ax.grid(True, alpha=0.25)
             ax.legend(fontsize=8)
+
             fig.tight_layout(rect=[0, 0, 1, 0.92])
             save_plot("priority_queues_bruteforce_slowdown.png")
 
-    if not has_columns(df, ["n", "average_degree", "pq", "cache_misses"]):
-        print("[skip] priority queue cache plot missing cache_misses")
-        return
+    # ------------------------------------------------------------
+    # Helper for binary vs Fibonacci ratios
+    # ------------------------------------------------------------
 
-    cache = filter_name_contains(
-        df,
-        "pq",
-        ["fib", "fibonacci", "binary", "mutable"],
-    )
+    def binary_fibonacci_ratio(metric: str) -> Optional[pd.DataFrame]:
+        if metric not in df.columns:
+            return None
 
-    if cache.empty:
-        cache = df[~df["pq"].apply(is_brute_force_name)].copy()
+        tmp = df[df["is_binary"] | df["is_fibonacci"]].copy()
+        tmp[metric] = pd.to_numeric(tmp[metric], errors="coerce")
+        tmp = tmp.dropna(subset=[metric])
 
-    if cache.empty:
-        cache = df.copy()
+        if tmp.empty:
+            return None
 
-    cache_data = mean_by(
-        cache,
-        ["n", "average_degree", "pq"],
-        ["cache_misses"],
-    )
-
-    cache_data = cache_data[~cache_data["pq"].apply(is_brute_force_name)].copy()
-
-    for average_degree, sub_degree in cache_data.groupby("average_degree"):
-        fig, ax = plt.subplots(figsize=(11, 6))
-
-        fig.suptitle(
-            f"Priority Queue Cache Misses — Average Degree {average_degree}",
-            fontsize=15,
+        grouped = mean_by(
+            tmp,
+            ["n", "average_degree", "pq_short"],
+            [metric],
         )
 
-        for pq, sub in sub_degree.groupby("pq"):
+        binary = grouped[grouped["pq_short"] == "Binary heap"].copy()
+        fibonacci = grouped[grouped["pq_short"] == "Fibonacci heap"].copy()
+
+        if binary.empty or fibonacci.empty:
+            return None
+
+        merged = binary.merge(
+            fibonacci,
+            on=["n", "average_degree"],
+            suffixes=("_binary", "_fibonacci"),
+        )
+
+        if merged.empty:
+            return None
+
+        merged[f"{metric}_ratio"] = (
+                merged[f"{metric}_fibonacci"] / merged[f"{metric}_binary"]
+        )
+
+        merged = merged.replace([np.inf, -np.inf], np.nan)
+        merged = merged.dropna(subset=[f"{metric}_ratio"])
+
+        return merged
+
+    # ------------------------------------------------------------
+    # 3. Fibonacci / binary runtime ratio
+    # ------------------------------------------------------------
+
+    runtime_ratio = binary_fibonacci_ratio("time_ms")
+
+    if runtime_ratio is not None and not runtime_ratio.empty:
+        fig, ax = plt.subplots(figsize=(11, 6))
+        fig.suptitle("Priority Queue: Fibonacci Heap vs Binary Heap Runtime", fontsize=15)
+
+        for average_degree, sub in runtime_ratio.groupby("average_degree"):
             sub = sub.sort_values("n")
 
             ax.plot(
                 sub["n"],
-                sub["cache_misses"],
+                sub["time_ms_ratio"],
                 marker="o",
                 linewidth=2,
-                label=str(pq),
+                label=f"average degree = {average_degree:g}",
             )
 
-        ax.set_title("Cache misses for heap implementations")
-        ax.set_xlabel("Number of nodes")
-        ax.set_ylabel("Cache misses")
+        ax.axhline(
+            1.0,
+            color="black",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.8,
+            label="same runtime",
+        )
+
+        ax.set_title("Runtime ratio = Fibonacci heap time / Binary heap time")
+        ax.set_xlabel("Number of vertices")
+        ax.set_ylabel("Runtime ratio")
+        ax.grid(True, alpha=0.25)
         ax.legend(fontsize=8)
 
         fig.tight_layout(rect=[0, 0, 1, 0.92])
+        save_plot("priority_queues_binary_vs_fibonacci_time_ratio.png")
 
-        save_plot(
-            f"priority_queues_heap_cache_misses_degree_{safe_filename(average_degree)}.png"
-        )
+    # ------------------------------------------------------------
+    # 4. Fibonacci / binary cache misses ratio
+    # ------------------------------------------------------------
+
+    if has_columns(df, ["cache_misses"]):
+        cache_ratio = binary_fibonacci_ratio("cache_misses")
+
+        if cache_ratio is not None and not cache_ratio.empty:
+            # Ignore disabled cache values.
+            cache_ratio = cache_ratio[
+                (cache_ratio["cache_misses_binary"] >= 0)
+                & (cache_ratio["cache_misses_fibonacci"] >= 0)
+                ].copy()
+
+            if not cache_ratio.empty:
+                fig, ax = plt.subplots(figsize=(11, 6))
+                fig.suptitle(
+                    "Priority Queue: Fibonacci Heap vs Binary Heap Cache Misses",
+                    fontsize=15,
+                )
+
+                for average_degree, sub in cache_ratio.groupby("average_degree"):
+                    sub = sub.sort_values("n")
+
+                    ax.plot(
+                        sub["n"],
+                        sub["cache_misses_ratio"],
+                        marker="o",
+                        linewidth=2,
+                        label=f"average degree = {average_degree:g}",
+                    )
+
+                ax.axhline(
+                    1.0,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.2,
+                    alpha=0.8,
+                    label="same cache misses",
+                )
+
+                ax.set_title("Cache-miss ratio = Fibonacci heap misses / Binary heap misses")
+                ax.set_xlabel("Number of vertices")
+                ax.set_ylabel("Cache-miss ratio")
+                ax.grid(True, alpha=0.25)
+                ax.legend(fontsize=8)
+
+                fig.tight_layout(rect=[0, 0, 1, 0.92])
+                save_plot("priority_queues_cache_misses_ratio.png")
+    else:
+        print("[skip] priority queue cache plot missing cache_misses")
+
+    # ------------------------------------------------------------
+    # 5. RSS delta memory plot
+    # ------------------------------------------------------------
+
+    if has_columns(df, ["rss_delta_bytes"]):
+        memory = df.copy()
+        memory["rss_delta_bytes"] = pd.to_numeric(memory["rss_delta_bytes"], errors="coerce")
+        memory = memory.dropna(subset=["rss_delta_bytes"])
+
+        if not memory.empty:
+            memory["rss_delta_mb"] = memory["rss_delta_bytes"] / (1024 * 1024)
+            memory["pq_short"] = memory["pq"].apply(short_pq_name)
+
+            memory_data = mean_by(
+                memory,
+                ["n", "pq_short"],
+                ["rss_delta_mb"],
+            )
+
+            order = ["Brute force", "Binary heap", "Fibonacci heap"]
+            memory_data["pq_short"] = pd.Categorical(
+                memory_data["pq_short"],
+                categories=order,
+                ordered=True,
+            )
+
+            fig, ax = plt.subplots(figsize=(11, 6))
+            fig.suptitle("Priority Queue: Approximate RSS Delta", fontsize=15)
+
+            for pq, sub in memory_data.groupby("pq_short", observed=False):
+                if sub.empty:
+                    continue
+
+                sub = sub.sort_values("n")
+
+                ax.plot(
+                    sub["n"],
+                    sub["rss_delta_mb"],
+                    marker="o",
+                    linewidth=2,
+                    label=str(pq),
+                )
+
+            ax.set_title("Process RSS after run - before run")
+            ax.set_xlabel("Number of vertices")
+            ax.set_ylabel("RSS delta (MB)")
+            ax.grid(True, alpha=0.25)
+            ax.legend(fontsize=8)
+
+            fig.tight_layout(rect=[0, 0, 1, 0.92])
+            save_plot("priority_queues_rss_delta_by_pq.png")
+    else:
+        print("[skip] priority queue memory plot missing rss_delta_bytes")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -424,6 +711,12 @@ def plot_coloring() -> None:
     if "matches_optimal" in df.columns:
         value_cols.append("matches_optimal")
 
+    if "colors_used" in df.columns:
+        value_cols.append("colors_used")
+
+    if "num_conflict_edges" in df.columns:
+        value_cols.append("num_conflict_edges")
+
     data = mean_by(
         df,
         ["n", "radius", "approach"],
@@ -431,10 +724,11 @@ def plot_coloring() -> None:
     )
 
     data["time_ms"] = pd.to_numeric(data["time_ms"], errors="coerce")
-    data = data.dropna(subset=["time_ms"])
+    data["n"] = pd.to_numeric(data["n"], errors="coerce")
+    data["radius"] = pd.to_numeric(data["radius"], errors="coerce")
 
-    # Log scale cannot display zero or negative values.
-    # Replace zero values with a tiny positive floor if needed.
+    data = data.dropna(subset=["n", "radius", "time_ms"])
+
     positive_times = data[data["time_ms"] > 0]["time_ms"]
 
     if positive_times.empty:
@@ -444,78 +738,154 @@ def plot_coloring() -> None:
     min_positive = positive_times.min()
     data.loc[data["time_ms"] <= 0, "time_ms"] = min_positive / 10.0
 
-    fig = plt.figure(figsize=(14, 7), constrained_layout=True)
-    gs = fig.add_gridspec(2, 1, height_ratios=[5, 1.1])
+    # ------------------------------------------------------------
+    # Plot 1: runtime only, with optimality as annotation
+    # ------------------------------------------------------------
 
-    ax_time = fig.add_subplot(gs[0])
-    ax_opt = fig.add_subplot(gs[1])
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.suptitle("Graph Coloring: Brute Force vs Welsh-Powell", fontsize=15)
 
-    fig.suptitle("Graph Coloring: Runtime and Optimality", fontsize=15)
-
-    for key, sub in data.groupby(["radius", "approach"]):
+    for (radius, approach), sub in data.groupby(["radius", "approach"]):
         sub = sub.sort_values("n")
-        radius, approach = key
 
-        ax_time.plot(
+        ax.plot(
             sub["n"],
             sub["time_ms"],
             marker="o",
-            linewidth=2,
-            label=f"radius={radius}, {approach}",
+            linewidth=2.2,
+            label=f"{approach}, radius={radius:g}",
         )
 
-    ax_time.set_yscale("log")
-    ax_time.set_title("Runtime, log scale")
-    ax_time.set_xlabel("Number of nodes")
-    ax_time.set_ylabel("Time (ms, log scale)")
-
-    ax_time.legend(fontsize=8)
+    ax.set_yscale("log")
+    ax.set_title("Runtime comparison, logarithmic scale")
+    ax.set_xlabel("Number of vertices")
+    ax.set_ylabel("Runtime (ms, log scale)")
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=8)
 
     if "matches_optimal" in data.columns:
-        optimal = data.copy()
+        opt = data.copy()
+        opt["matches_optimal"] = pd.to_numeric(opt["matches_optimal"], errors="coerce")
 
-        optimal["matches_optimal"] = pd.to_numeric(
-            optimal["matches_optimal"],
+        wp = opt[opt["approach"].astype(str).str.contains("welsh", case=False, na=False)]
+        if not wp.empty and wp["matches_optimal"].notna().any():
+            match_rate = wp["matches_optimal"].mean()
+            ax.text(
+                0.02,
+                0.10,
+                f"Welsh-Powell matched the optimal solution in {100.0 * match_rate:.0f}% "
+                "of tested cases where brute force was available.",
+                transform=ax.transAxes,
+                fontsize=10,
+                va="bottom",
+                ha="left",
+                bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="#999999"),
+            )
+
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    save_plot("coloring_runtime_log.png")
+
+    # ------------------------------------------------------------
+    # Plot 2: speedup of Welsh-Powell over brute force
+    # ------------------------------------------------------------
+
+    brute = data[data["approach"].astype(str).str.contains("brute", case=False, na=False)].copy()
+    wp = data[data["approach"].astype(str).str.contains("welsh", case=False, na=False)].copy()
+
+    if not brute.empty and not wp.empty:
+        brute = brute.rename(columns={"time_ms": "time_ms_brute"})
+        wp = wp.rename(columns={"time_ms": "time_ms_welsh"})
+
+        merged = brute.merge(
+            wp,
+            on=["n", "radius"],
+            suffixes=("_brute", "_welsh"),
+        )
+
+        if not merged.empty:
+            merged["speedup"] = merged["time_ms_brute"] / merged["time_ms_welsh"]
+            merged = merged.replace([np.inf, -np.inf], np.nan)
+            merged = merged.dropna(subset=["speedup"])
+
+            if not merged.empty:
+                fig, ax = plt.subplots(figsize=(12, 6))
+                fig.suptitle("Graph Coloring: Welsh-Powell Speedup", fontsize=15)
+
+                for radius, sub in merged.groupby("radius"):
+                    sub = sub.sort_values("n")
+
+                    ax.plot(
+                        sub["n"],
+                        sub["speedup"],
+                        marker="o",
+                        linewidth=2.2,
+                        label=f"radius={radius:g}",
+                    )
+
+                ax.set_yscale("log")
+                ax.axhline(
+                    1.0,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.2,
+                    alpha=0.8,
+                    label="same runtime",
+                )
+
+                ax.set_title("Speedup = brute-force time / Welsh-Powell time")
+                ax.set_xlabel("Number of vertices")
+                ax.set_ylabel("Welsh-Powell speedup over brute force")
+                ax.grid(True, alpha=0.25)
+                ax.legend(fontsize=8)
+
+                fig.tight_layout(rect=[0, 0, 1, 0.92])
+                save_plot("coloring_welsh_powell_speedup.png")
+
+    # ------------------------------------------------------------
+    # Plot 3: optional difficulty plot using conflict edges
+    # ------------------------------------------------------------
+
+    if "num_conflict_edges" in data.columns and "colors_used" in data.columns:
+        difficulty = data.copy()
+        difficulty["num_conflict_edges"] = pd.to_numeric(
+            difficulty["num_conflict_edges"],
+            errors="coerce",
+        )
+        difficulty["colors_used"] = pd.to_numeric(
+            difficulty["colors_used"],
             errors="coerce",
         )
 
-        opt_summary = (
-            optimal.groupby("approach")["matches_optimal"]
-            .mean()
-            .sort_index()
-        )
+        difficulty = difficulty.dropna(subset=["num_conflict_edges", "colors_used"])
 
-        ax_opt.bar(
-            opt_summary.index.astype(str),
-            opt_summary.values,
-        )
+        if not difficulty.empty:
+            wp_difficulty = difficulty[
+                difficulty["approach"].astype(str).str.contains("welsh", case=False, na=False)
+            ].copy()
 
-        ax_opt.set_ylim(0, 1.05)
-        ax_opt.set_ylabel("Optimal rate")
-        ax_opt.set_title("Optimal solution match rate")
-        ax_opt.set_xlabel("")
+            if not wp_difficulty.empty:
+                fig, ax = plt.subplots(figsize=(12, 6))
+                fig.suptitle("Graph Coloring: Graph Difficulty", fontsize=15)
 
-        for i, value in enumerate(opt_summary.values):
-            if pd.notna(value):
-                ax_opt.text(
-                    i,
-                    min(value + 0.03, 1.03),
-                    f"{value:.2f}",
-                    ha="center",
-                    va="bottom",
-                    fontsize=9,
-                )
-    else:
-        ax_opt.text(
-            0.5,
-            0.5,
-            "matches_optimal column not available",
-            ha="center",
-            va="center",
-        )
-        ax_opt.axis("off")
+                for radius, sub in wp_difficulty.groupby("radius"):
+                    sub = sub.sort_values("n")
 
-    save_plot("coloring_time_and_optimality.png")
+                    ax.plot(
+                        sub["num_conflict_edges"],
+                        sub["colors_used"],
+                        marker="o",
+                        linewidth=2.2,
+                        label=f"radius={radius:g}",
+                    )
+
+                ax.set_title("Colors used by Welsh-Powell vs conflict edges")
+                ax.set_xlabel("Number of conflict edges")
+                ax.set_ylabel("Colors used")
+                ax.grid(True, alpha=0.25)
+                ax.legend(fontsize=8)
+
+                fig.tight_layout(rect=[0, 0, 1, 0.92])
+                save_plot("coloring_conflict_edges_vs_colors.png")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
